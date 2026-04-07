@@ -4,12 +4,12 @@
   "private": true,
   "description": "有向记忆图 + 多角色 LLM 类脑智能体系统",
   "scripts": {
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:backend": "cd backend && npm run dev",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "build:frontend": "cd frontend && npm run build",
-    "build:backend": "cd backend && npm run build",
-    "build": "npm run build:backend && npm run build:frontend",
+    "dev:frontend": "cd frontend && bun run dev",
+    "dev:backend": "cd backend && bun run dev",
+    "dev": "concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
+    "build:frontend": "cd frontend && bun run build",
+    "build:backend": "cd backend && bun run build",
+    "build": "bun run build:backend && bun run build:frontend",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
