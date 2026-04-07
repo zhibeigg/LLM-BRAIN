@@ -56,6 +56,47 @@ export function getSessionsByUser(userId: string, brainId?: string, limit = 50):
   return rows.map(rowToSession)
 }
 
+export interface PaginatedSessions {
+  items: ChatSession[]
+  hasMore: boolean
+  nextCursor?: number
+}
+
+export function getSessionsByUserPaginated(
+  userId: string,
+  brainId?: string,
+  cursor?: number,
+  limit = 20,
+): PaginatedSessions {
+  const db = getDb()
+  const fetchLimit = limit + 1 // 多取一条判断 hasMore
+
+  let rows: ChatSessionRow[]
+  if (brainId && cursor) {
+    rows = db.prepare(
+      'SELECT * FROM chat_sessions WHERE user_id = ? AND brain_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?'
+    ).all(userId, brainId, cursor, fetchLimit) as ChatSessionRow[]
+  } else if (brainId) {
+    rows = db.prepare(
+      'SELECT * FROM chat_sessions WHERE user_id = ? AND brain_id = ? ORDER BY created_at DESC LIMIT ?'
+    ).all(userId, brainId, fetchLimit) as ChatSessionRow[]
+  } else if (cursor) {
+    rows = db.prepare(
+      'SELECT * FROM chat_sessions WHERE user_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?'
+    ).all(userId, cursor, fetchLimit) as ChatSessionRow[]
+  } else {
+    rows = db.prepare(
+      'SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
+    ).all(userId, fetchLimit) as ChatSessionRow[]
+  }
+
+  const hasMore = rows.length > limit
+  const items = (hasMore ? rows.slice(0, limit) : rows).map(rowToSession)
+  const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].createdAt : undefined
+
+  return { items, hasMore, nextCursor }
+}
+
 export function getSessionById(id: string, userId: string): ChatSession | null {
   const db = getDb()
   const row = db.prepare(

@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
-import { Box, Typography, Chip, LinearProgress, Alert, Collapse, IconButton, Tooltip, Button } from '@mui/material'
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import { Box, Typography, Chip, LinearProgress, Alert, Collapse, IconButton, Tooltip, Button, CircularProgress } from '@mui/material'
 import {
   Psychology as ThinkIcon,
   Route as RouteIcon,
@@ -15,12 +15,13 @@ import {
   HourglassTop as RunningIcon,
   ChevronRight as ChevronRightIcon,
   CheckCircle as ChosenIcon,
-  Block as FilteredIcon,
   Circle as DotIcon,
   Close as CloseIcon,
   Queue as QueueIcon,
+  Build as BuildIcon,
 } from '@mui/icons-material'
 import { useTaskStore } from '../../stores/taskStore'
+import { useGraphStore } from '../../stores/graphStore'
 import type { ThinkingStep, ChatSession } from '../../stores/taskStore'
 import type {
   LeaderStepPayload,
@@ -28,9 +29,12 @@ import type {
   AgentStreamPayload,
   BossVerdictPayload,
   LearningProgressPayload,
+  ToolCallPayload,
+  LLMTrace,
 } from '../../types'
 import { useColors, useThemeMode } from '../../ThemeContext'
 import { MarkdownRenderer } from '../common/MarkdownRenderer'
+import { ToolCallCard } from './ToolCallCard'
 
 /* ── 步骤配置 ── */
 
@@ -40,6 +44,7 @@ const STEP_CONFIG = {
   agent_stream: { icon: AgentIcon, color: '#4ADE80', label: 'Agent 输出' },
   boss_verdict: { icon: BossIcon, color: '#FBBF24', label: 'Boss 评审' },
   learning_progress: { icon: LearnIcon, color: '#C084FC', label: '知识学习' },
+  tool_call: { icon: BuildIcon, color: '#F59E0B', label: '工具调用' },
 } as const
 
 /** 步骤卡片内部颜色（跟随主题） */
@@ -67,6 +72,286 @@ function useStepTheme() {
     historyHover: isDark ? '#1E1F22' : '#E8E8ED',
     progressBg: isDark ? '#3A3D41' : '#D1D1D6',
   }
+}
+
+/* ── LLM 调用溯源详情 ── */
+
+/** 尝试解析 JSON，失败返回 null */
+function tryParseJson(str: string): Record<string, unknown> | null {
+  try { return JSON.parse(str) } catch { return null }
+}
+
+/** 渲染一个键值行 */
+function TraceRow({ label, children }: { label: string; children: React.ReactNode }) {
+  const t = useStepTheme()
+  return (
+    <Box sx={{ display: 'flex', gap: 1, fontSize: 11, lineHeight: 1.5 }}>
+      <Typography sx={{ fontSize: 11, color: t.dimText, flexShrink: 0, minWidth: 48, fontWeight: 600 }}>{label}</Typography>
+      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+    </Box>
+  )
+}
+
+/** 将 prompt/response 的 JSON 渲染为友好格式 */
+function FriendlyContent({ text, maxHeight }: { text: string; maxHeight?: number }) {
+  const t = useStepTheme()
+  const c = useColors()
+  const parsed = tryParseJson(text)
+
+  if (!parsed) {
+    // 纯文本，按段落渲染
+    return (
+      <Box sx={{ maxHeight: maxHeight ?? 200, overflowY: 'auto' }}>
+        {text.split('\n\n').map((block, i) => {
+          const trimmed = block.trim()
+          if (!trimmed) return null
+          const colonIdx = trimmed.indexOf('：')
+          if (colonIdx > 0 && colonIdx < 8 && !trimmed.includes('\n')) {
+            return (
+              <Box key={i} sx={{ mb: 0.5 }}>
+                <Typography component="span" sx={{ fontSize: 11, color: c.primary, fontWeight: 600 }}>
+                  {trimmed.slice(0, colonIdx + 1)}
+                </Typography>
+                <Typography component="span" sx={{ fontSize: 11, color: t.bodyText }}>
+                  {trimmed.slice(colonIdx + 1)}
+                </Typography>
+              </Box>
+            )
+          }
+          return (
+            <Typography key={i} sx={{ fontSize: 11, color: t.bodyText, whiteSpace: 'pre-wrap', mb: 0.5 }}>
+              {trimmed.length > 500 ? trimmed.slice(0, 500) + '…' : trimmed}
+            </Typography>
+          )
+        })}
+      </Box>
+    )
+  }
+
+  // JSON 对象，按字段渲染
+  return (
+    <Box sx={{ maxHeight: maxHeight ?? 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+      {Object.entries(parsed).map(([key, val]) => {
+        // 跳过过长的 ID 列表
+        if (key === 'visitedNodes' && Array.isArray(val)) {
+          return (
+            <TraceRow key={key} label="已访问">
+              <Typography sx={{ fontSize: 11, color: t.mutedText }}>{(val as string[]).length} 个节点</Typography>
+            </TraceRow>
+          )
+        }
+        // candidates 列表
+        if (key === 'candidates' && Array.isArray(val)) {
+          return (
+            <TraceRow key={key} label="候选">
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                {(val as Array<Record<string, unknown>>).map((cd, i) => (
+                  <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography sx={{ fontSize: 11, flex: 1, color: t.bodyText }}>
+                      {String(cd.targetTitle ?? cd.targetNodeTitle ?? '?')}
+                    </Typography>
+                    <Typography sx={{ fontSize: 10, color: t.dimText }}>
+                      {typeof cd.perceivedDifficulty === 'number' ? `${(cd.perceivedDifficulty * 100).toFixed(0)}%` : ''}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            </TraceRow>
+          )
+        }
+        // currentNode 对象
+        if (key === 'currentNode' && typeof val === 'object' && val) {
+          const node = val as Record<string, unknown>
+          return (
+            <TraceRow key={key} label="当前节点">
+              <Typography sx={{ fontSize: 11, color: t.bodyText, fontWeight: 500 }}>
+                {String(node.title ?? '?')}
+                <Typography component="span" sx={{ fontSize: 10, color: t.dimText, ml: 0.5 }}>({String(node.type ?? '')})</Typography>
+              </Typography>
+              {node.content && (
+                <Typography sx={{ fontSize: 10, color: t.mutedText, mt: 0.25 }}>
+                  {String(node.content).slice(0, 100)}{String(node.content).length > 100 ? '…' : ''}
+                </Typography>
+              )}
+            </TraceRow>
+          )
+        }
+        // retryHistory
+        if (key === 'retryHistory' && Array.isArray(val)) {
+          if (val.length === 0) return null
+          return (
+            <TraceRow key={key} label="重试历史">
+              <Typography sx={{ fontSize: 11, color: t.mutedText }}>{val.length} 条记录</Typography>
+            </TraceRow>
+          )
+        }
+        // personality 数组
+        if (key === 'personality' && Array.isArray(val)) {
+          return (
+            <TraceRow key={key} label="性格">
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3 }}>
+                {(val as Array<Record<string, unknown>>).map((dim, i) => {
+                  const v = typeof dim.value === 'number' ? dim.value as number : 0.5
+                  const barColor = v < 0.3 ? '#4ADE80' : v < 0.7 ? '#FBBF24' : '#A78BFA'
+                  return (
+                    <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <Typography sx={{ fontSize: 10, color: t.dimText, width: 52, flexShrink: 0 }}>{String(dim.name)}</Typography>
+                      <Box sx={{ flex: 1, height: 4, borderRadius: 2, bgcolor: t.chipBg, overflow: 'hidden', maxWidth: 80 }}>
+                        <Box sx={{ width: `${v * 100}%`, height: '100%', borderRadius: 2, bgcolor: barColor }} />
+                      </Box>
+                      <Typography sx={{ fontSize: 10, color: t.bodyText, fontWeight: 600, width: 28, fontVariantNumeric: 'tabular-nums' }}>
+                        {v.toFixed(2)}
+                      </Typography>
+                    </Box>
+                  )
+                })}
+              </Box>
+            </TraceRow>
+          )
+        }
+
+        // 已知字段名映射
+        const labelMap: Record<string, string> = {
+          task: '任务', originalTask: '任务',
+          totalSteps: '总步数', retryCount: '重试次数',
+          agentResult: 'Agent结果', action: '动作', edgeId: '选择边',
+          reason: '理由', thinking: '思考', passed: '通过', feedback: '反馈',
+          isLoop: '循环', message: '消息', reply: '回复', status: '状态',
+          command: '命令', content: '内容', description: '描述',
+        }
+        const label = labelMap[key] ?? key
+
+        // 渲染值
+        if (val === null || val === undefined) return null
+
+        if (typeof val === 'string') {
+          const truncated = val.length > 500 ? val.slice(0, 500) + '…' : val
+          return (
+            <TraceRow key={key} label={label}>
+              <Typography sx={{ fontSize: 11, color: t.bodyText, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {truncated}
+              </Typography>
+            </TraceRow>
+          )
+        }
+        if (typeof val === 'number') {
+          const display = key.includes('ifficulty') ? `${(val * 100).toFixed(0)}%` : String(val)
+          return (
+            <TraceRow key={key} label={label}>
+              <Typography sx={{ fontSize: 11, color: t.bodyText }}>{display}</Typography>
+            </TraceRow>
+          )
+        }
+        if (typeof val === 'boolean') {
+          return (
+            <TraceRow key={key} label={label}>
+              <Typography sx={{ fontSize: 11, color: val ? '#4ADE80' : '#EF4444', fontWeight: 600 }}>{val ? '是' : '否'}</Typography>
+            </TraceRow>
+          )
+        }
+        // 对象或数组 fallback：递归渲染为缩进块
+        if (typeof val === 'object') {
+          const jsonStr = JSON.stringify(val, null, 2)
+          return (
+            <TraceRow key={key} label={label}>
+              <Box
+                component="pre"
+                sx={{
+                  fontSize: 10, color: t.mutedText, m: 0, p: 0.5,
+                  bgcolor: t.chipBg, borderRadius: '4px',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  maxHeight: 100, overflowY: 'auto',
+                }}
+              >
+                {jsonStr.length > 300 ? jsonStr.slice(0, 300) + '…' : jsonStr}
+              </Box>
+            </TraceRow>
+          )
+        }
+
+        return (
+          <TraceRow key={key} label={label}>
+            <Typography sx={{ fontSize: 11, color: t.bodyText }}>{String(val)}</Typography>
+          </TraceRow>
+        )
+      })}
+    </Box>
+  )
+}
+
+function TraceDetail({ trace }: { trace?: LLMTrace }) {
+  const t = useStepTheme()
+  const [open, setOpen] = useState(false)
+
+  if (!trace) return null
+  const hasContent = trace.prompt || trace.rawResponse || trace.model || trace.tokenUsage || trace.latencyMs
+  if (!hasContent) return null
+
+  return (
+    <Box sx={{ mt: 1 }}>
+      <Box
+        onClick={() => setOpen(!open)}
+        sx={{
+          display: 'flex', alignItems: 'center', gap: 0.5,
+          cursor: 'pointer', userSelect: 'none',
+          '&:hover': { '& .trace-label': { color: '#F59E0B' } },
+        }}
+      >
+        <ExpandMoreIcon
+          sx={{
+            fontSize: 16, color: t.dimText,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.2s',
+          }}
+        />
+        <Typography className="trace-label" sx={{ fontSize: 11, color: t.dimText, transition: 'color 0.15s' }}>
+          {open ? '收起溯源' : '溯源详情'}
+        </Typography>
+        {trace.model && (
+          <Chip
+            label={trace.model}
+            size="small"
+            sx={{
+              height: 16, fontSize: 9, ml: 0.5,
+              bgcolor: 'transparent', color: t.dimText,
+              border: `1px solid ${t.chipBorder}`,
+              '& .MuiChip-label': { px: 0.5 },
+            }}
+          />
+        )}
+        {trace.latencyMs != null && (
+          <Typography sx={{ fontSize: 10, color: t.dimText, ml: 0.5, fontVariantNumeric: 'tabular-nums' }}>
+            {trace.latencyMs}ms
+          </Typography>
+        )}
+        {trace.tokenUsage && (
+          <Typography sx={{ fontSize: 10, color: t.dimText, ml: 0.5, fontVariantNumeric: 'tabular-nums' }}>
+            {trace.tokenUsage.prompt}+{trace.tokenUsage.completion}t
+          </Typography>
+        )}
+      </Box>
+      <Collapse in={open} timeout={200}>
+        <Box sx={{ mt: 0.75, pl: 1, borderLeft: `2px solid ${t.chipBorder}`, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {trace.prompt && (
+            <Box>
+              <Typography sx={{ fontSize: 10, color: t.dimText, mb: 0.5, fontWeight: 600 }}>Prompt</Typography>
+              <Box sx={{ pl: 0.5 }}>
+                <FriendlyContent text={trace.prompt} />
+              </Box>
+            </Box>
+          )}
+          {trace.rawResponse && (
+            <Box>
+              <Typography sx={{ fontSize: 10, color: t.dimText, mb: 0.5, fontWeight: 600 }}>Response</Typography>
+              <Box sx={{ pl: 0.5 }}>
+                <FriendlyContent text={trace.rawResponse} />
+              </Box>
+            </Box>
+          )}
+        </Box>
+      </Collapse>
+    </Box>
+  )
 }
 
 function formatTime(ts: number) {
@@ -122,12 +407,14 @@ function mergeSteps(steps: ThinkingStep[]): MergedStep[] {
 function PathChoiceCard({
   leaderStep,
   decision,
+  stepNumber,
   index,
   isLast,
   isBusy,
 }: {
   leaderStep: ThinkingStep
   decision?: ThinkingStep
+  stepNumber: number
   index: number
   isLast: boolean
   isBusy: boolean
@@ -135,6 +422,7 @@ function PathChoiceCard({
   const c = useColors()
   const t = useStepTheme()
   const [thinkingOpen, setThinkingOpen] = useState(false)
+  const graphNodes = useGraphStore((s) => s.nodes)
 
   const stepData = leaderStep.data as LeaderStepPayload
   const decisionData = decision?.data as LeaderDecisionPayload | undefined
@@ -145,8 +433,14 @@ function PathChoiceCard({
   const accentColor = '#A78BFA'
   const dotClass = isLast && isBusy ? 'step-dot step-dot--breathing' : 'step-dot'
 
-  // 找到当前节点的标题（从候选中推断）
-  const currentNodeLabel = stepData.currentNodeId?.slice(0, 8) ?? '?'
+  // 从图谱中查找当前节点标题
+  const currentNodeTitle = graphNodes.find(n => n.id === stepData.currentNodeId)?.title
+    ?? stepData.currentNodeId?.slice(0, 8) ?? '?'
+
+  // 找到被选中的目标节点名
+  const chosenTarget = chosenEdgeId
+    ? stepData.candidates.find(cd => cd.edgeId === chosenEdgeId)
+    : null
 
   return (
     <Box
@@ -214,7 +508,7 @@ function PathChoiceCard({
           }}
         />
 
-        {/* 标题栏：当前节点 + 时间 */}
+        {/* 标题栏：步骤编号 + 当前节点 + 时间 */}
         <Box
           sx={{
             display: 'flex', alignItems: 'center', gap: 1,
@@ -224,19 +518,23 @@ function PathChoiceCard({
         >
           <RouteIcon sx={{ fontSize: 15, color: accentColor }} />
           <Typography sx={{ fontSize: 13, fontWeight: 600, color: accentColor, letterSpacing: '0.02em' }}>
-            路径选择
+            #{stepNumber}
           </Typography>
-          <Chip
-            label={currentNodeLabel}
-            size="small"
-            sx={{
-              height: 20, fontSize: 10, fontFamily: 'monospace',
-              bgcolor: t.chipBg, color: t.bodyText,
-              border: `1px solid ${t.chipBorder}`,
-            }}
-          />
-          <Box sx={{ flex: 1 }} />
-          <Typography sx={{ fontSize: 11, color: t.dimText, fontVariantNumeric: 'tabular-nums' }}>
+          <Typography sx={{ fontSize: 12, color: t.bodyText, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            {currentNodeTitle}
+          </Typography>
+          {stepData.candidates.length > 0 && (
+            <Chip
+              label={`${stepData.candidates.length} 条路径`}
+              size="small"
+              sx={{
+                height: 18, fontSize: 10,
+                bgcolor: t.chipBg, color: t.dimText,
+                border: `1px solid ${t.chipBorder}`,
+              }}
+            />
+          )}
+          <Typography sx={{ fontSize: 11, color: t.dimText, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
             {formatTime(leaderStep.timestamp)}
           </Typography>
         </Box>
@@ -250,7 +548,6 @@ function PathChoiceCard({
           )}
           {stepData.candidates.map((cd) => {
             const isChosen = chosenEdgeId === cd.edgeId
-            const isFiltered = cd.filtered
 
             return (
               <Box
@@ -264,16 +561,13 @@ function PathChoiceCard({
                   mb: 0.5,
                   borderRadius: '6px',
                   border: `1px solid ${isChosen ? `${c.success}40` : 'transparent'}`,
-                  bgcolor: isChosen ? `${c.success}08` : isFiltered ? `${c.textMuted}06` : 'transparent',
-                  opacity: isFiltered ? 0.45 : 1,
+                  bgcolor: isChosen ? `${c.success}08` : 'transparent',
                   transition: 'all 0.2s',
                 }}
               >
                 {/* 状态图标 */}
                 {isChosen ? (
                   <ChosenIcon sx={{ fontSize: 15, color: c.success, flexShrink: 0 }} />
-                ) : isFiltered ? (
-                  <FilteredIcon sx={{ fontSize: 14, color: t.filteredText, flexShrink: 0 }} />
                 ) : isDecided ? (
                   <DotIcon sx={{ fontSize: 6, color: t.dimText, flexShrink: 0, mx: '4.5px' }} />
                 ) : (
@@ -285,8 +579,7 @@ function PathChoiceCard({
                   sx={{
                     fontSize: 13,
                     fontWeight: isChosen ? 600 : 400,
-                    color: isChosen ? c.success : isFiltered ? t.filteredText : t.brightText,
-                    textDecoration: isFiltered ? 'line-through' : 'none',
+                    color: isChosen ? c.success : t.brightText,
                     flex: 1,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -302,9 +595,9 @@ function PathChoiceCard({
                   size="small"
                   sx={{
                     height: 18, fontSize: 10, flexShrink: 0,
-                    bgcolor: isChosen ? `${c.success}15` : isFiltered ? t.filteredChipBg : `${accentColor}15`,
-                    color: isChosen ? c.success : isFiltered ? t.filteredText : accentColor,
-                    border: `1px solid ${isChosen ? `${c.success}30` : isFiltered ? t.chipBorder : `${accentColor}30`}`,
+                    bgcolor: isChosen ? `${c.success}15` : `${accentColor}15`,
+                    color: isChosen ? c.success : accentColor,
+                    border: `1px solid ${isChosen ? `${c.success}30` : `${accentColor}30`}`,
                   }}
                 />
 
@@ -333,11 +626,27 @@ function PathChoiceCard({
           {/* 决策结果 */}
           {isDecided && (
             <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${t.chipBorder}` }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
                 <RouteIcon sx={{ fontSize: 14, color: isStopped ? t.mutedText : '#5B8DEF' }} />
-                <Typography sx={{ fontSize: 12, fontWeight: 600, color: isStopped ? t.mutedText : '#5B8DEF' }}>
-                  {isStopped ? '决定停止遍历' : '已选择路径'}
-                </Typography>
+                {isStopped ? (
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, color: t.mutedText }}>
+                    停止遍历
+                  </Typography>
+                ) : (
+                  <>
+                    <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#5B8DEF' }}>
+                      → {chosenTarget?.targetNodeTitle ?? '未知'}
+                    </Typography>
+                    <Typography sx={{ fontSize: 11, color: t.dimText }}>
+                      继续第 {(decisionData?.totalSteps ?? stepNumber) + 1} 步
+                    </Typography>
+                  </>
+                )}
+                {decisionData?.reason && (
+                  <Typography sx={{ fontSize: 11, color: t.mutedText, fontStyle: 'italic' }}>
+                    — {decisionData.reason.length > 60 ? decisionData.reason.slice(0, 60) + '…' : decisionData.reason}
+                  </Typography>
+                )}
               </Box>
             </Box>
           )}
@@ -367,9 +676,15 @@ function PathChoiceCard({
               <Collapse in={thinkingOpen} timeout={200}>
                 <Box sx={{ mt: 0.75, pl: 1, borderLeft: `2px solid ${t.chipBorder}` }}>
                   {stepData.thinking && (
-                    <Typography sx={{ fontSize: 12, color: t.mutedText, whiteSpace: 'pre-wrap', fontStyle: 'italic', mb: decisionData?.reason ? 1 : 0 }}>
-                      {stepData.thinking}
-                    </Typography>
+                    <Box sx={{ mb: decisionData?.reason ? 1 : 0 }}>
+                      {tryParseJson(stepData.thinking) ? (
+                        <FriendlyContent text={stepData.thinking} maxHeight={150} />
+                      ) : (
+                        <Typography sx={{ fontSize: 12, color: t.mutedText, whiteSpace: 'pre-wrap', fontStyle: 'italic' }}>
+                          {stepData.thinking}
+                        </Typography>
+                      )}
+                    </Box>
                   )}
                   {decisionData?.reason && (
                     <Typography sx={{ fontSize: 12, color: t.bodyText, whiteSpace: 'pre-wrap' }}>
@@ -380,6 +695,10 @@ function PathChoiceCard({
               </Collapse>
             </Box>
           )}
+
+          {/* 溯源信息 */}
+          <TraceDetail trace={stepData.trace} />
+          {decisionData?.trace && <TraceDetail trace={decisionData.trace} />}
         </Box>
       </div>
     </Box>
@@ -398,6 +717,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
         <Box sx={{ position: 'relative' }}>
           <MarkdownRenderer content={data.chunk} color={t.agentText} />
           {!data.done && <span className="agent-cursor" />}
+          {data.done && <TraceDetail trace={data.trace} />}
         </Box>
       )
     }
@@ -423,6 +743,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
           <Typography style={{ color: t.bodyText, fontSize: 13, whiteSpace: 'pre-wrap' }}>
             {data.feedback}
           </Typography>
+          <TraceDetail trace={data.trace} />
         </>
       )
     }
@@ -465,6 +786,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
               />
             </Box>
           )}
+          <TraceDetail trace={data.trace} />
         </>
       )
     }
@@ -656,6 +978,67 @@ function EmptyState() {
   )
 }
 
+/* ── 路径概览条 ── */
+
+function PathOverview({ mergedSteps }: { mergedSteps: MergedStep[] }) {
+  const c = useColors()
+  const t = useStepTheme()
+  const graphNodes = useGraphStore((s) => s.nodes)
+
+  // 从 path_choice 步骤中提取路径节点
+  const pathNodes: Array<{ nodeId: string; title: string; chosen: boolean; stopped: boolean }> = []
+
+  for (const merged of mergedSteps) {
+    if (merged.kind !== 'path_choice' || !merged.leaderStep) continue
+    const stepData = merged.leaderStep.data as LeaderStepPayload
+    const decisionData = merged.decision?.data as LeaderDecisionPayload | undefined
+    const nodeTitle = graphNodes.find(n => n.id === stepData.currentNodeId)?.title ?? stepData.currentNodeId?.slice(0, 6)
+
+    const chosenEdgeId = decisionData?.chosenEdgeId
+    const chosenTarget = chosenEdgeId ? stepData.candidates.find(cd => cd.edgeId === chosenEdgeId) : null
+    const isStopped = !!merged.decision && !chosenEdgeId
+
+    pathNodes.push({ nodeId: stepData.currentNodeId, title: nodeTitle, chosen: !!chosenTarget, stopped: isStopped })
+
+    // 如果是最后一步且选了目标，把目标也加上
+    if (chosenTarget && merged === mergedSteps.filter(m => m.kind === 'path_choice').at(-1)) {
+      pathNodes.push({ nodeId: chosenTarget.targetNodeId, title: chosenTarget.targetNodeTitle, chosen: false, stopped: false })
+    }
+  }
+
+  if (pathNodes.length < 2) return null
+
+  return (
+    <Box sx={{
+      mb: 1.5, px: 1.5, py: 1, borderRadius: '8px',
+      bgcolor: `${c.primary}06`, border: `1px solid ${c.primary}15`,
+      display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap',
+      overflow: 'hidden',
+    }}>
+      <RouteIcon sx={{ fontSize: 13, color: c.primary, mr: 0.25, flexShrink: 0 }} />
+      {pathNodes.map((node, i) => (
+        <Box key={`${node.nodeId}-${i}`} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {i > 0 && (
+            <Typography sx={{ fontSize: 11, color: node.stopped ? c.error : t.dimText, lineHeight: 1 }}>
+              {node.stopped ? '✕' : '→'}
+            </Typography>
+          )}
+          <Typography sx={{
+            fontSize: 11, color: i === pathNodes.length - 1 && !node.stopped ? c.primary : t.bodyText,
+            fontWeight: i === 0 || i === pathNodes.length - 1 ? 600 : 400,
+            whiteSpace: 'nowrap',
+          }}>
+            {node.title}
+          </Typography>
+        </Box>
+      ))}
+      <Typography sx={{ fontSize: 10, color: t.dimText, ml: 'auto', flexShrink: 0 }}>
+        {pathNodes.length - 1} 步
+      </Typography>
+    </Box>
+  )
+}
+
 /* ── Prompt 区域（支持展开/收起） ── */
 
 function PromptCard({ prompt, isHistory }: { prompt: string; isHistory: boolean }) {
@@ -741,9 +1124,13 @@ export function ThinkingPanel() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomAnchorRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
 
   const busy = isRunning || isLearning
+  const sessionsHasMore = useTaskStore((s) => s.sessionsHasMore)
+  const sessionsLoading = useTaskStore((s) => s.sessionsLoading)
+  const loadMoreSessions = useTaskStore((s) => s.loadMoreSessions)
 
   const viewingSession = useMemo(() => {
     if (!viewingSessionId) return null
@@ -772,6 +1159,21 @@ export function ThinkingPanel() {
       scrollRef.current.scrollTop = 0
     }
   }, [viewingSessionId, isViewingHistory])
+
+  // 渐进式滚动加载历史会话
+  useEffect(() => {
+    if (!historyOpen || !loadMoreRef.current) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && sessionsHasMore && !sessionsLoading) {
+          loadMoreSessions()
+        }
+      },
+      { threshold: 0.1 },
+    )
+    observer.observe(loadMoreRef.current)
+    return () => observer.disconnect()
+  }, [historyOpen, sessionsHasMore, sessionsLoading, loadMoreSessions])
 
   const statusColor = useMemo(() => {
     if (isLearning) return '#C084FC'
@@ -827,9 +1229,9 @@ export function ThinkingPanel() {
 
       {/* 历史会话列表 */}
       <Collapse in={historyOpen && historySessions.length > 0} timeout={200}>
-        <Box sx={{ mb: 2, maxHeight: 220, overflowY: 'auto', borderRadius: '10px', border: `1px solid ${c.border}`, bgcolor: t.historyBg, p: 1, flexShrink: 0 }}>
+        <Box sx={{ mb: 2, maxHeight: 320, overflowY: 'auto', borderRadius: '10px', border: `1px solid ${c.border}`, bgcolor: t.historyBg, p: 1, flexShrink: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, px: 0.5 }}>
-            <Typography sx={{ fontSize: 11, color: c.textMuted, fontWeight: 500 }}>历史会话 ({historySessions.length})</Typography>
+            <Typography sx={{ fontSize: 11, color: c.textMuted, fontWeight: 500 }}>历史会话 ({historySessions.length}{sessionsHasMore ? '+' : ''})</Typography>
           </Box>
           {historySessions.map((session) => (
             <SessionItem
@@ -841,6 +1243,18 @@ export function ThinkingPanel() {
               onDelete={() => deleteSession(session.id)}
             />
           ))}
+          {/* 滚动加载哨兵 */}
+          <div ref={loadMoreRef} style={{ height: 1 }} />
+          {sessionsLoading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
+              <CircularProgress size={18} thickness={4} sx={{ color: c.primary }} />
+            </Box>
+          )}
+          {!sessionsHasMore && historySessions.length > 0 && (
+            <Typography sx={{ fontSize: 11, color: c.textMuted, textAlign: 'center', py: 0.5 }}>
+              已加载全部
+            </Typography>
+          )}
         </Box>
       </Collapse>
 
@@ -983,36 +1397,59 @@ export function ThinkingPanel() {
         <Box ref={scrollRef} sx={{ height: '100%', overflowY: 'auto', pr: 0.5, pt: 0.5 }}>
           {displayPrompt && <PromptCard prompt={displayPrompt} isHistory={isViewingHistory} />}
 
+          {/* 路径概览条 */}
+          <PathOverview mergedSteps={mergedSteps} />
+
           {mergedSteps.length === 0 && !displayPrompt ? (
             <EmptyState />
           ) : (
-            mergedSteps.map((merged, i) => {
-              const isLast = i === mergedSteps.length - 1
-              if (merged.kind === 'path_choice' && merged.leaderStep) {
-                return (
-                  <PathChoiceCard
-                    key={merged.leaderStep.id}
-                    leaderStep={merged.leaderStep}
-                    decision={merged.decision}
-                    index={i}
-                    isLast={isLast}
-                    isBusy={!isViewingHistory && busy}
-                  />
-                )
-              }
-              if (merged.step) {
-                return (
-                  <StepCard
-                    key={merged.step.id}
-                    step={merged.step}
-                    index={i}
-                    isLast={isLast}
-                    isBusy={!isViewingHistory && busy}
-                  />
-                )
-              }
-              return null
-            })
+            (() => {
+              let pathStepNum = 0
+              return mergedSteps.map((merged, i) => {
+                const isLast = i === mergedSteps.length - 1
+                if (merged.kind === 'path_choice' && merged.leaderStep) {
+                  pathStepNum++
+                  return (
+                    <PathChoiceCard
+                      key={merged.leaderStep.id}
+                      leaderStep={merged.leaderStep}
+                      decision={merged.decision}
+                      stepNumber={pathStepNum}
+                      index={i}
+                      isLast={isLast}
+                      isBusy={!isViewingHistory && busy}
+                    />
+                  )
+                }
+                if (merged.step) {
+                  // tool_call 类型直接渲染为 ToolCallCard（自带卡片样式）
+                  if (merged.step.type === 'tool_call') {
+                    return (
+                      <Box key={merged.step.id} sx={{ pl: 3.5, pb: 1, position: 'relative' }}>
+                        <Box
+                          sx={{
+                            position: 'absolute', left: 10, top: 0, bottom: 0, width: '1.5px',
+                            background: isLast ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)` : c.border,
+                            opacity: 0.6,
+                          }}
+                        />
+                        <ToolCallCard data={merged.step.data as ToolCallPayload} />
+                      </Box>
+                    )
+                  }
+                  return (
+                    <StepCard
+                      key={merged.step.id}
+                      step={merged.step}
+                      index={i}
+                      isLast={isLast}
+                      isBusy={!isViewingHistory && busy}
+                    />
+                  )
+                }
+                return null
+              })
+            })()
           )}
 
           <div ref={bottomAnchorRef} />

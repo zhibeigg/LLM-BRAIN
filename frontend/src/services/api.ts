@@ -263,9 +263,20 @@ export interface ChatSessionDTO {
   updatedAt: number
 }
 
+export interface ChatSessionPageResult {
+  items: ChatSessionDTO[]
+  hasMore: boolean
+  nextCursor?: number
+}
+
 export const chatSessionsApi = {
-  getAll: (brainId?: string) =>
-    request<ChatSessionDTO[]>(brainId ? `/chat-sessions?brainId=${brainId}` : '/chat-sessions'),
+  getPage: (brainId?: string, cursor?: number, limit = 20) => {
+    const params = new URLSearchParams()
+    if (brainId) params.set('brainId', brainId)
+    if (cursor) params.set('cursor', String(cursor))
+    params.set('limit', String(limit))
+    return request<ChatSessionPageResult>(`/chat-sessions?${params.toString()}`)
+  },
 
   create: (data: { brainId: string; type: 'task' | 'learn'; prompt: string }) =>
     request<ChatSessionDTO>('/chat-sessions', {

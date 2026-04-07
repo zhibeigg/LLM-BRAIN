@@ -159,12 +159,23 @@ export interface ExecutionHistory {
   createdAt: number
 }
 
+// ===== LLM 调用溯源 =====
+
+export interface LLMTrace {
+  model?: string
+  prompt?: string
+  rawResponse?: string
+  tokenUsage?: { prompt: number; completion: number }
+  latencyMs?: number
+}
+
 // ===== WebSocket 消息类型 =====
 
 export type WSMessageType =
   | 'leader_step'
   | 'leader_decision'
   | 'agent_stream'
+  | 'tool_call'
   | 'boss_verdict'
   | 'evolution_update'
   | 'graph_update'
@@ -190,20 +201,32 @@ export interface LeaderStepPayload {
     targetNodeTitle: string
     perceivedDifficulty: number
     difficultyTypes: DifficultyType[]
-    filtered: boolean
   }>
   thinking: string
+  trace?: LLMTrace
 }
 
 export interface LeaderDecisionPayload {
   chosenEdgeId: string | null
   reason: string
   totalSteps: number
+  trace?: LLMTrace
 }
 
 export interface AgentStreamPayload {
   chunk: string
   done: boolean
+  trace?: LLMTrace
+}
+
+export interface ToolCallPayload {
+  callId: string
+  toolName: string
+  arguments: string
+  phase: 'start' | 'end'
+  result?: string
+  success?: boolean
+  durationMs?: number
 }
 
 export interface BossVerdictPayload {
@@ -211,6 +234,7 @@ export interface BossVerdictPayload {
   feedback: string
   isLoop: boolean
   retryCount: number
+  trace?: LLMTrace
 }
 
 export interface EvolutionUpdatePayload {
@@ -239,6 +263,7 @@ export interface LearningProgressPayload {
   edgesCreated?: number
   totalNodes?: number
   totalEdges?: number
+  trace?: LLMTrace
 }
 
 // ===== 任务队列 =====

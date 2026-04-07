@@ -4,7 +4,7 @@ import type { ChatMessage, OpenAIToolDef } from '../providers/base.js'
 import type { ToolContext } from '../../types/index.js'
 import { executeTool } from '../../tools/index.js'
 import { broadcast } from '../../ws/server.js'
-import type { AgentStreamPayload } from '../../types/index.js'
+import type { AgentStreamPayload, ToolCallPayload } from '../../types/index.js'
 
 const MAX_TOOL_ROUNDS = 10
 
@@ -56,10 +56,14 @@ export class AgentRole extends LLMRoleBase {
 
       // 逐个执行工具
       for (const tc of result.tool_calls) {
-        broadcast('agent_stream', {
-          chunk: `\n🔧 调用工具: ${tc.function.name}(${tc.function.arguments})\n`,
-          done: false,
-        } satisfies AgentStreamPayload)
+        const startTime = Date.now()
+
+        broadcast('tool_call', {
+          callId: tc.id,
+          toolName: tc.function.name,
+          arguments: tc.function.arguments,
+          phase: 'start',
+        } satisfies ToolCallPayload)
 
         const toolResult = await executeTool(tc.function.name, tc.function.arguments, toolCtx)
 
@@ -67,10 +71,15 @@ export class AgentRole extends LLMRoleBase {
           ? toolResult.output
           : `错误: ${toolResult.error}`
 
-        broadcast('agent_stream', {
-          chunk: `📋 工具结果: ${output.substring(0, 200)}${output.length > 200 ? '...' : ''}\n\n`,
-          done: false,
-        } satisfies AgentStreamPayload)
+        broadcast('tool_call', {
+          callId: tc.id,
+          toolName: tc.function.name,
+          arguments: tc.function.arguments,
+          phase: 'end',
+          result: output,
+          success: toolResult.success,
+          durationMs: Date.now() - startTime,
+        } satisfies ToolCallPayload)
 
         // 将工具结果作为 tool 消息加入上下文
         messages.push({

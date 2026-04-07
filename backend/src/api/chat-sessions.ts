@@ -3,13 +3,15 @@ import * as chatSessionsDb from '../db/chat-sessions.js'
 
 export const chatSessionsRouter = Router()
 
-// GET /chat-sessions?brainId=xxx
+// GET /chat-sessions?brainId=xxx&cursor=123&limit=20
 chatSessionsRouter.get('/', (req, res) => {
   try {
     const userId = req.userId!
     const brainId = req.query.brainId as string | undefined
-    const sessions = chatSessionsDb.getSessionsByUser(userId, brainId)
-    res.json(sessions)
+    const cursor = req.query.cursor ? Number(req.query.cursor) : undefined
+    const limit = req.query.limit ? Number(req.query.limit) : 20
+    const result = chatSessionsDb.getSessionsByUserPaginated(userId, brainId, cursor, limit)
+    res.json(result)
   } catch (e) {
     res.status(500).json({ message: e instanceof Error ? e.message : '获取会话失败' })
   }

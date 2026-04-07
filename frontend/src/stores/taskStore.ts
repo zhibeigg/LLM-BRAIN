@@ -5,6 +5,7 @@ import type {
   AgentStreamPayload,
   BossVerdictPayload,
   LearningProgressPayload,
+  ToolCallPayload,
   QueueItem,
   ExecutionMode,
   PlanReadyPayload,
@@ -18,7 +19,7 @@ import { wsClient } from '../services/websocket'
 
 export interface ThinkingStep {
   id: string
-  type: 'leader_step' | 'leader_decision' | 'agent_stream' | 'boss_verdict' | 'learning_progress'
+  type: 'leader_step' | 'leader_decision' | 'agent_stream' | 'boss_verdict' | 'learning_progress' | 'tool_call'
   timestamp: number
   data:
     | LeaderStepPayload
@@ -26,6 +27,7 @@ export interface ThinkingStep {
     | AgentStreamPayload
     | BossVerdictPayload
     | LearningProgressPayload
+    | ToolCallPayload
 }
 
 export interface ChatSession {
@@ -69,10 +71,17 @@ interface TaskState {
   pendingPlan: PlanReadyPayload | null
   pendingStep: StepConfirmPayload | null
 
+  // 分页状态
+  sessionsHasMore: boolean
+  sessionsLoading: boolean
+  sessionsCursor: number | null
+
   startTask: (prompt: string) => Promise<void>
   learnTopic: (topic: string) => Promise<void>
   addThinkingStep: (step: ThinkingStep) => void
   mergeAgentStream: (payload: AgentStreamPayload, timestamp: number) => void
+  addToolCall: (payload: ToolCallPayload, timestamp: number) => void
+  updateToolCall: (callId: string, payload: ToolCallPayload, timestamp: number) => void
   appendAgentOutput: (chunk: string) => void
   setActiveEdge: (edgeId: string | null) => void
   setActiveNode: (nodeId: string | null) => void
@@ -85,6 +94,7 @@ interface TaskState {
   deleteSession: (id: string) => void
   clearSessions: () => void
   loadSessions: () => Promise<void>
+  loadMoreSessions: () => Promise<void>
   setQueue: (queue: QueueItem[]) => void
   removeFromQueue: (id: string) => Promise<void>
   setExecutionMode: (mode: ExecutionMode) => void
@@ -130,6 +140,9 @@ const initialState = {
   autoReview: localStorage.getItem('llm-brain-auto-review') === 'true',
   pendingPlan: null as PlanReadyPayload | null,
   pendingStep: null as StepConfirmPayload | null,
+  sessionsHasMore: true,
+  sessionsLoading: false,
+  sessionsCursor: null as number | null,
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -255,6 +268,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           data: {
             chunk: prevData.chunk + payload.chunk,
             done: payload.done,
+            trace: payload.trace ?? prevData.trace,
           },
         }
         return { thinkingSteps: [...steps.slice(0, -1), merged] }
@@ -272,6 +286,28 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         ],
       }
     }),
+
+  addToolCall: (payload, timestamp) =>
+    set((state) => ({
+      thinkingSteps: [
+        ...state.thinkingSteps,
+        {
+          id: `tool-call-${payload.callId}`,
+          type: 'tool_call' as const,
+          timestamp,
+          data: payload,
+        },
+      ],
+    })),
+
+  updateToolCall: (callId, payload, timestamp) =>
+    set((state) => ({
+      thinkingSteps: state.thinkingSteps.map((step) =>
+        step.type === 'tool_call' && (step.data as ToolCallPayload).callId === callId
+          ? { ...step, timestamp, data: payload }
+          : step,
+      ),
+    })),
 
   appendAgentOutput: (chunk) =>
     set((state) => ({
@@ -375,11 +411,37 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   loadSessions: async () => {
     const brainId = useBrainStore.getState().currentBrainId
+    set({ sessionsLoading: true })
     try {
-      const dtos = await chatSessionsApi.getAll(brainId ?? undefined)
-      set({ sessions: dtos.map(dtoToSession) })
+      const result = await chatSessionsApi.getPage(brainId ?? undefined)
+      set({
+        sessions: result.items.map(dtoToSession),
+        sessionsHasMore: result.hasMore,
+        sessionsCursor: result.nextCursor ?? null,
+        sessionsLoading: false,
+      })
     } catch (e) {
       console.error('加载会话历史失败:', e)
+      set({ sessionsLoading: false })
+    }
+  },
+
+  loadMoreSessions: async () => {
+    const { sessionsHasMore, sessionsLoading, sessionsCursor } = get()
+    if (!sessionsHasMore || sessionsLoading) return
+    const brainId = useBrainStore.getState().currentBrainId
+    set({ sessionsLoading: true })
+    try {
+      const result = await chatSessionsApi.getPage(brainId ?? undefined, sessionsCursor ?? undefined)
+      set((s) => ({
+        sessions: [...s.sessions, ...result.items.map(dtoToSession)],
+        sessionsHasMore: result.hasMore,
+        sessionsCursor: result.nextCursor ?? null,
+        sessionsLoading: false,
+      }))
+    } catch (e) {
+      console.error('加载更多会话失败:', e)
+      set({ sessionsLoading: false })
     }
   },
 

@@ -10,6 +10,7 @@ import type {
   BossVerdictPayload,
   LearningProgressPayload,
   NodeExtractedPayload,
+  ToolCallPayload,
   QueueItem,
   PlanReadyPayload,
   StepConfirmPayload,
@@ -21,6 +22,8 @@ const nextId = () => `step-${Date.now()}-${++idCounter}`
 export function useWebSocket() {
   const addThinkingStep = useTaskStore((s) => s.addThinkingStep)
   const mergeAgentStream = useTaskStore((s) => s.mergeAgentStream)
+  const addToolCall = useTaskStore((s) => s.addToolCall)
+  const updateToolCall = useTaskStore((s) => s.updateToolCall)
   const appendAgentOutput = useTaskStore((s) => s.appendAgentOutput)
   const setActiveEdge = useTaskStore((s) => s.setActiveEdge)
   const setActiveNode = useTaskStore((s) => s.setActiveNode)
@@ -63,6 +66,15 @@ export function useWebSocket() {
       appendAgentOutput(payload.chunk)
       // 合并连续的 agent_stream 到同一个步骤中
       mergeAgentStream(payload, msg.timestamp)
+    })
+
+    const unsubToolCall = wsClient.on('tool_call', (msg: WSMessage) => {
+      const payload = msg.payload as ToolCallPayload
+      if (payload.phase === 'start') {
+        addToolCall(payload, msg.timestamp)
+      } else {
+        updateToolCall(payload.callId, payload, msg.timestamp)
+      }
     })
 
     const unsubBossVerdict = wsClient.on('boss_verdict', (msg: WSMessage) => {
@@ -144,6 +156,7 @@ export function useWebSocket() {
       unsubLeaderStep()
       unsubLeaderDecision()
       unsubAgentStream()
+      unsubToolCall()
       unsubBossVerdict()
       unsubLearningProgress()
       unsubGraphUpdate()
@@ -156,5 +169,5 @@ export function useWebSocket() {
       unsubError()
       wsClient.disconnect()
     }
-  }, [addThinkingStep, mergeAgentStream, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, fetchGraph, addNewNodeId])
+  }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, fetchGraph, addNewNodeId])
 }
