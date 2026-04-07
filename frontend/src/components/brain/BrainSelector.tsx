@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Box, Typography, IconButton, Menu, MenuItem, ListItemText,
   ListItemIcon, Divider, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Button, Tooltip, CircularProgress,
+  List, ListItemButton, Breadcrumbs, Link, FormControlLabel, Checkbox,
 } from '@mui/material'
 import {
   Add as AddIcon,
@@ -11,14 +12,17 @@ import {
   KeyboardArrowDown as ArrowIcon,
   FolderOpen as FolderIcon,
   AutoAwesome as AIIcon,
+  AccountTree as InitIcon,
 } from '@mui/icons-material'
 import { useBrainStore } from '../../stores/brainStore'
 import { useGraphStore } from '../../stores/graphStore'
 import { usePersonalityStore } from '../../stores/personalityStore'
-import { personalityApi } from '../../services/api'
-import { darkColors as c } from '../../theme'
+import { personalityApi, fsApi } from '../../services/api'
+import type { DirEntry } from '../../services/api'
+import { useColors } from '../../ThemeContext'
 
-export function BrainSelector() {
+export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}) {
+  const c = useColors()
   const { brains, currentBrainId, loading, fetchBrains, createBrain, deleteBrain, selectBrain } = useBrainStore()
   const fetchGraph = useGraphStore((s) => s.fetchGraph)
   const fetchDimensions = usePersonalityStore((s) => s.fetchDimensions)
@@ -31,11 +35,48 @@ export function BrainSelector() {
   const [personalityText, setPersonalityText] = useState('')
   const [creating, setCreating] = useState(false)
   const [aiStatus, setAiStatus] = useState<string | null>(null)
+  const [initProject, setInitProject] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  // 目录浏览弹窗状态
+  const [dirBrowserOpen, setDirBrowserOpen] = useState(false)
+  const [dirList, setDirList] = useState<DirEntry[]>([])
+  const [dirCurrent, setDirCurrent] = useState('')
+  const [dirLoading, setDirLoading] = useState(false)
+
+  const loadDirs = useCallback(async (path?: string) => {
+    setDirLoading(true)
+    try {
+      const res = await fsApi.listDirs(path)
+      setDirList(res.dirs)
+      setDirCurrent(res.current)
+    } catch (e) {
+      console.error('加载目录失败:', e)
+    } finally {
+      setDirLoading(false)
+    }
+  }, [])
+
+  const handleOpenDirBrowser = useCallback(() => {
+    setDirBrowserOpen(true)
+    loadDirs(newProjectPath || undefined)
+  }, [loadDirs, newProjectPath])
+
+  const handleSelectDir = useCallback(() => {
+    setNewProjectPath(dirCurrent)
+    setDirBrowserOpen(false)
+  }, [dirCurrent])
 
   useEffect(() => {
     fetchBrains()
   }, [fetchBrains])
+
+  // 外部触发打开创建弹窗
+  useEffect(() => {
+    if (requestCreate && requestCreate > 0) {
+      setCreateOpen(true)
+    }
+  }, [requestCreate])
 
   const handleSelect = (id: string) => {
     selectBrain(id)
@@ -53,6 +94,7 @@ export function BrainSelector() {
     setPersonalityText('')
     setAiStatus(null)
     setCreating(false)
+    setInitProject(false)
   }
 
   const handleCreate = async () => {
@@ -62,7 +104,7 @@ export function BrainSelector() {
 
     try {
       // 1. 创建大脑
-      const brain = await createBrain(newName.trim(), newDesc.trim(), newProjectPath.trim())
+      const brain = await createBrain(newName.trim(), newDesc.trim(), newProjectPath.trim(), initProject && !!newProjectPath.trim())
 
       // 2. 如果填写了性格描述，调用 AI 生成性格维度
       if (personalityText.trim()) {
@@ -106,28 +148,47 @@ export function BrainSelector() {
 
   return (
     <>
-      <Tooltip title="切换大脑">
-        <Box
-          onClick={(e) => setAnchorEl(e.currentTarget)}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 0.75,
-            px: 1.25,
-            py: 0.75,
-            borderRadius: '8px',
-            cursor: 'pointer',
-            '&:hover': { bgcolor: `${c.primary}10` },
-            border: `1px solid ${c.border}`,
-          }}
-        >
-          <BrainIcon sx={{ fontSize: 18, color: c.primary }} />
-          <Typography sx={{ fontSize: 14, fontWeight: 600, color: c.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {loading ? '...' : currentBrain?.name ?? '无大脑'}
-          </Typography>
-          <ArrowIcon sx={{ fontSize: 18, color: c.textMuted, flexShrink: 0 }} />
-        </Box>
-      </Tooltip>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Tooltip title="切换大脑">
+          <Box
+            onClick={(e) => setAnchorEl(e.currentTarget)}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              px: 1.25,
+              py: 0.75,
+              borderRadius: '8px',
+              cursor: 'pointer',
+              '&:hover': { bgcolor: `${c.primary}10` },
+              border: `1px solid ${c.border}`,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            <BrainIcon sx={{ fontSize: 18, color: c.primary }} />
+            <Typography sx={{ fontSize: 14, fontWeight: 600, color: c.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {loading ? '...' : currentBrain?.name ?? '无大脑'}
+            </Typography>
+            <ArrowIcon sx={{ fontSize: 18, color: c.textMuted, flexShrink: 0 }} />
+          </Box>
+        </Tooltip>
+        {currentBrain && (
+          <Tooltip title="删除当前大脑">
+            <IconButton
+              size="small"
+              onClick={() => setDeleteConfirmId(currentBrainId!)}
+              sx={{
+                flexShrink: 0,
+                color: c.textMuted,
+                '&:hover': { color: c.error, bgcolor: `${c.error}10` },
+              }}
+            >
+              <DeleteIcon sx={{ fontSize: 17 }} />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
 
       <Menu
         anchorEl={anchorEl}
@@ -226,23 +287,61 @@ export function BrainSelector() {
               <FolderIcon sx={{ fontSize: 16, color: c.textMuted }} />
               <Typography sx={{ fontSize: 12, color: c.textSecondary }}>项目目录</Typography>
             </Box>
-            <TextField
-              size="small"
-              value={newProjectPath}
-              onChange={(e) => setNewProjectPath(e.target.value)}
-              placeholder="输入本地项目路径，如 D:\code\my-project"
-              fullWidth
-              disabled={creating}
-              sx={{
-                '& .MuiInputBase-input': {
-                  fontFamily: '"JetBrains Mono", "Cascadia Code", monospace',
-                  fontSize: 13,
-                },
-              }}
-            />
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+              <TextField
+                size="small"
+                value={newProjectPath}
+                onChange={(e) => setNewProjectPath(e.target.value)}
+                placeholder="点击浏览选择目录"
+                fullWidth
+                disabled={creating}
+                sx={{
+                  '& .MuiInputBase-input': {
+                    fontFamily: '"JetBrains Mono", "Cascadia Code", monospace',
+                    fontSize: 13,
+                  },
+                }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleOpenDirBrowser}
+                disabled={creating}
+                sx={{ minWidth: 64, height: 40, flexShrink: 0 }}
+              >
+                浏览
+              </Button>
+            </Box>
             <Typography sx={{ fontSize: 11, color: c.textMuted, mt: 0.5 }}>
               关联本地项目目录，大脑将基于此路径进行知识学习
             </Typography>
+
+            {/* 初始化项目结构 */}
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={initProject}
+                  onChange={(e) => setInitProject(e.target.checked)}
+                  disabled={creating || !newProjectPath.trim()}
+                  sx={{ py: 0 }}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <InitIcon sx={{ fontSize: 15, color: newProjectPath.trim() ? c.primary : c.textMuted }} />
+                  <Typography sx={{ fontSize: 13, color: newProjectPath.trim() ? c.text : c.textMuted }}>
+                    初始化项目结构
+                  </Typography>
+                </Box>
+              }
+              sx={{ mt: 0.5, ml: 0 }}
+            />
+            {initProject && newProjectPath.trim() && (
+              <Typography sx={{ fontSize: 11, color: c.textMuted, ml: 3.5 }}>
+                AI 将自动分析项目结构并生成知识图谱节点
+              </Typography>
+            )}
           </Box>
 
           {/* 性格描述 → AI 生成 */}
@@ -311,6 +410,109 @@ export function BrainSelector() {
         <DialogActions>
           <Button onClick={() => setDeleteConfirmId(null)} size="small">取消</Button>
           <Button onClick={handleDelete} color="error" variant="contained" size="small">删除</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 目录浏览 Dialog */}
+      <Dialog open={dirBrowserOpen} onClose={() => setDirBrowserOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 17, pb: 1 }}>选择项目目录</DialogTitle>
+        <DialogContent sx={{ px: 2, pb: 1 }}>
+          {/* 面包屑导航 */}
+          <Breadcrumbs sx={{ mb: 1.5, fontSize: 13 }}>
+            <Link
+              component="button"
+              underline="hover"
+              color="inherit"
+              onClick={() => loadDirs()}
+              sx={{ fontSize: 13, cursor: 'pointer' }}
+            >
+              根目录
+            </Link>
+            {dirCurrent && dirCurrent.split(/[/\\]/).filter(Boolean).map((seg, i, arr) => {
+              const fullPath = arr.slice(0, i + 1).join('\\')
+              // Windows 驱动器需要加反斜杠
+              const navPath = i === 0 && fullPath.endsWith(':') ? fullPath + '\\' : fullPath
+              const isLast = i === arr.length - 1
+              return isLast ? (
+                <Typography key={i} sx={{ fontSize: 13, fontWeight: 600, color: c.primary }}>{seg}</Typography>
+              ) : (
+                <Link
+                  key={i}
+                  component="button"
+                  underline="hover"
+                  color="inherit"
+                  onClick={() => loadDirs(navPath)}
+                  sx={{ fontSize: 13, cursor: 'pointer' }}
+                >
+                  {seg}
+                </Link>
+              )
+            })}
+          </Breadcrumbs>
+
+          {/* 当前路径 */}
+          {dirCurrent && (
+            <Box sx={{
+              px: 1.5, py: 0.75, mb: 1, borderRadius: 1,
+              bgcolor: c.bgInput, fontFamily: 'monospace', fontSize: 12, color: c.textSecondary,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {dirCurrent}
+            </Box>
+          )}
+
+          {/* 目录列表 */}
+          <Box sx={{
+            border: `1px solid ${c.border}`, borderRadius: 1,
+            maxHeight: 320, overflowY: 'auto',
+          }}>
+            {dirLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : dirList.length === 0 ? (
+              <Typography sx={{ py: 2, textAlign: 'center', fontSize: 13, color: c.textMuted }}>
+                没有子目录
+              </Typography>
+            ) : (
+              <List dense disablePadding>
+                {/* 返回上级 */}
+                {dirCurrent && (
+                  <ListItemButton
+                    onClick={() => {
+                      const parent = dirCurrent.replace(/[/\\][^/\\]+[/\\]?$/, '') || ''
+                      loadDirs(parent || undefined)
+                    }}
+                    sx={{ py: 0.75 }}
+                  >
+                    <FolderIcon sx={{ fontSize: 18, color: c.warning, mr: 1.5 }} />
+                    <Typography sx={{ fontSize: 13, color: c.textSecondary }}>..</Typography>
+                  </ListItemButton>
+                )}
+                {dirList.map((dir) => (
+                  <ListItemButton
+                    key={dir.path}
+                    onClick={() => loadDirs(dir.path)}
+                    sx={{ py: 0.75 }}
+                  >
+                    <FolderIcon sx={{ fontSize: 18, color: c.primary, mr: 1.5 }} />
+                    <Typography sx={{ fontSize: 13, color: c.text }}>{dir.name}</Typography>
+                  </ListItemButton>
+                ))}
+              </List>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDirBrowserOpen(false)} size="small">取消</Button>
+          <Button
+            onClick={handleSelectDir}
+            variant="contained"
+            size="small"
+            disabled={!dirCurrent}
+          >
+            选择此目录
+          </Button>
         </DialogActions>
       </Dialog>
     </>

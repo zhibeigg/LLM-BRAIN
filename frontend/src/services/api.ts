@@ -7,6 +7,7 @@ import type {
   LLMRoleConfig,
   DifficultyPersonalityMapping,
   DifficultyType,
+  ToolDefinition,
 } from '../types'
 import { getToken } from '../stores/authStore'
 
@@ -44,10 +45,10 @@ export const brainsApi = {
   getById: (id: string) =>
     request<Brain>(`/brains/${id}`),
 
-  create: (name: string, description?: string, projectPath?: string) =>
+  create: (name: string, description?: string, projectPath?: string, initProject?: boolean) =>
     request<Brain>('/brains', {
       method: 'POST',
-      body: JSON.stringify({ name, description, projectPath }),
+      body: JSON.stringify({ name, description, projectPath, initProject }),
     }),
 
   update: (id: string, updates: Partial<Pick<Brain, 'name' | 'description'>>) =>
@@ -224,18 +225,24 @@ export const difficultyMappingApi = {
 // ===== 任务执行 API =====
 
 export const taskApi = {
-  execute: (prompt: string, brainId: string) =>
-    request<{ taskId: string }>('/task/execute', {
+  execute: (prompt: string, brainId: string, mode?: import('../types').ExecutionMode, enabledTools?: string[]) =>
+    request<{ status: string; queueItemId: string; message: string }>('/task/execute', {
       method: 'POST',
-      body: JSON.stringify({ prompt, brainId }),
+      body: JSON.stringify({ prompt, brainId, mode, enabledTools }),
     }),
+
+  getQueue: () =>
+    request<{ queue: import('../types').QueueItem[] }>('/task/queue'),
+
+  removeFromQueue: (id: string) =>
+    request<{ status: string }>(`/task/queue/${id}`, { method: 'DELETE' }),
 }
 
 // ===== 学习 API =====
 
 export const learnApi = {
   learn: (topic: string, brainId: string) =>
-    request<{ status: string; message: string }>('/learn', {
+    request<{ status: string; queueItemId: string; message: string }>('/learn', {
       method: 'POST',
       body: JSON.stringify({ topic, brainId }),
     }),
@@ -274,4 +281,23 @@ export const chatSessionsApi = {
 
   delete: (id: string) =>
     request<void>(`/chat-sessions/${id}`, { method: 'DELETE' }),
+}
+
+// ===== 工具 API =====
+
+export const toolsApi = {
+  getAll: () =>
+    request<ToolDefinition[]>('/tools'),
+}
+
+// ===== 文件系统 API =====
+
+export interface DirEntry {
+  name: string
+  path: string
+}
+
+export const fsApi = {
+  listDirs: (path?: string) =>
+    request<{ current: string; dirs: DirEntry[] }>(`/fs/list-dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 }

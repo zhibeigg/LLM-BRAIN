@@ -8,7 +8,7 @@ interface BrainState {
   loading: boolean
 
   fetchBrains: () => Promise<void>
-  createBrain: (name: string, description?: string, projectPath?: string) => Promise<Brain>
+  createBrain: (name: string, description?: string, projectPath?: string, initProject?: boolean) => Promise<Brain>
   deleteBrain: (id: string) => Promise<void>
   selectBrain: (id: string) => void
 }
@@ -37,8 +37,8 @@ export const useBrainStore = create<BrainState>((set, get) => ({
     }
   },
 
-  createBrain: async (name, description, projectPath) => {
-    const brain = await brainsApi.create(name, description, projectPath)
+  createBrain: async (name, description, projectPath, initProject) => {
+    const brain = await brainsApi.create(name, description, projectPath, initProject)
     set((state) => ({
       brains: [brain, ...state.brains],
       currentBrainId: brain.id,

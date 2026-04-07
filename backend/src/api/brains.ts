@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { getAllBrains, getBrainById, createBrain, updateBrain, deleteBrain } from '../db/brains.js'
+import { initProjectGraph } from '../core/init/engine.js'
 
 export const brainsRouter = Router()
 
@@ -29,13 +30,20 @@ brainsRouter.get('/:id', (req, res) => {
 // POST / - 创建大脑
 brainsRouter.post('/', (req, res) => {
   try {
-    const { name, description, projectPath } = req.body
+    const { name, description, projectPath, initProject } = req.body
     if (!name || typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ error: '名称不能为空' })
       return
     }
     const brain = createBrain(name.trim(), description?.trim() ?? '', req.userId ?? '', projectPath?.trim() ?? '')
     res.status(201).json(brain)
+
+    // 异步初始化项目图谱（不阻塞响应）
+    if (initProject && projectPath?.trim()) {
+      initProjectGraph(brain.id, projectPath.trim()).catch(err => {
+        console.error('项目初始化失败:', err)
+      })
+    }
   } catch (e) {
     res.status(500).json({ error: String(e) })
   }
