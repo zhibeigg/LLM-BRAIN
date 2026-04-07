@@ -1,0 +1,267 @@
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #13141f;
+  color: #E8EAF6;
+  font-family: 'Inter', 'Noto Sans SC', sans-serif;
+}
+
+/* 彻底杀掉 MUI dark mode 的 elevation overlay */
+* {
+  --Paper-overlay: none !important;
+  --Paper-shadow: none !important;
+}
+
+.MuiPaper-root,
+.MuiBox-root,
+.MuiCollapse-root,
+.MuiCollapse-wrapper,
+.MuiCollapse-wrapperInner {
+  background-image: none !important;
+  --Paper-overlay: none !important;
+}
+
+/* React Flow 深色主题 */
+.react-flow__background {
+  background: #13141f !important;
+}
+
+.react-flow__minimap {
+  background: #191a2a !important;
+  border-radius: 8px;
+  border: 1px solid #333458;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.react-flow__controls {
+  border-radius: 8px;
+  border: 1px solid #333458;
+  background: #191a2a;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.react-flow__controls-button {
+  background: #232438 !important;
+  border-color: #333458 !important;
+  color: #A0A3BD !important;
+  fill: #A0A3BD !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #2a2b45 !important;
+  color: #E8613A !important;
+  fill: #E8613A !important;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+}
+
+/* 滚动条 - 深色 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3e3f62;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6C6F8A;
+}
+
+/* React Flow 连接线 */
+.react-flow__edge-path {
+  stroke-opacity: 0.8;
+}
+
+.react-flow__handle {
+  background: #6C6F8A !important;
+  border-color: #191a2a !important;
+}
+
+/* ========== ThinkingPanel 动画 ========== */
+
+/* 步骤卡片入场 */
+@keyframes stepSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 时间线圆点入场脉冲 */
+@keyframes dotPulseIn {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* 运行中最后一个圆点的持续脉冲 */
+@keyframes dotBreathing {
+  0%, 100% {
+    box-shadow: 0 0 4px var(--dot-color, #A78BFA),
+                0 0 8px color-mix(in srgb, var(--dot-color, #A78BFA) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 8px var(--dot-color, #A78BFA),
+                0 0 18px color-mix(in srgb, var(--dot-color, #A78BFA) 50%, transparent);
+  }
+}
+
+/* Boss 评审通过/失败边框闪烁 */
+@keyframes verdictFlash {
+  0% { border-color: var(--verdict-color, #4ADE80); }
+  30% { border-color: var(--verdict-color, #4ADE80); }
+  100% { border-color: #2a2c3e; }
+}
+
+/* Agent 输出光标闪烁 */
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 空状态呼吸脉冲 */
+@keyframes emptyPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.55;
+  }
+}
+
+@keyframes emptyRing {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.15;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.08;
+  }
+}
+
+/* 标题栏运行指示器脉冲 */
+@keyframes statusPulse {
+  0%, 100% {
+    box-shadow: 0 0 4px var(--status-color, #E8613A);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 12px var(--status-color, #E8613A),
+                0 0 20px color-mix(in srgb, var(--status-color, #E8613A) 30%, transparent);
+    opacity: 0.8;
+  }
+}
+
+/* 进度条发光 */
+@keyframes progressGlow {
+  0%, 100% {
+    filter: brightness(1) drop-shadow(0 0 2px currentColor);
+  }
+  50% {
+    filter: brightness(1.3) drop-shadow(0 0 6px currentColor);
+  }
+}
+
+/* 步骤卡片样式类 */
+.step-card {
+  animation: stepSlideIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.step-dot {
+  animation: dotPulseIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.step-dot--breathing {
+  animation: dotBreathing 2s ease-in-out infinite;
+}
+
+.step-card--verdict {
+  animation: stepSlideIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards,
+             verdictFlash 1.2s ease-out forwards;
+}
+
+/* Agent 终端风格 */
+.agent-terminal {
+  background: #0a0b14;
+  border-radius: 6px;
+  padding: 10px 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-terminal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.008) 2px,
+    rgba(255, 255, 255, 0.008) 4px
+  );
+  pointer-events: none;
+}
+
+.agent-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: #4ADE80;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: cursorBlink 1s step-end infinite;
+}
+
+/* 滚动区域渐变遮罩 */
+.thinking-scroll-container {
+  position: relative;
+}
+
+.thinking-scroll-container::before,
+.thinking-scroll-container::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.thinking-scroll-container::before {
+  top: 0;
+  background: linear-gradient(to bottom, #191a2a, transparent);
+}
+
+.thinking-scroll-container::after {
+  bottom: 0;
+  background: linear-gradient(to top, #191a2a, transparent);
+}

@@ -1,0 +1,1 @@
+export { PersonalityPanel } from './PersonalityPanel'
