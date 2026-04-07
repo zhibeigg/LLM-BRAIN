@@ -10,6 +10,8 @@ import { taskRouter } from './task.js'
 import { evolutionRouter } from './evolution.js'
 import { learnRouter } from './learn.js'
 import { chatSessionsRouter } from './chat-sessions.js'
+import { toolsRouter } from './tools.js'
+import { fsRouter } from './fs.js'
 
 export const apiRouter = Router()
 
@@ -24,3 +26,5 @@ apiRouter.use('/task', taskRouter)
 apiRouter.use('/evolution', evolutionRouter)
 apiRouter.use('/learn', learnRouter)
 apiRouter.use('/chat-sessions', chatSessionsRouter)
+apiRouter.use('/tools', toolsRouter)
+apiRouter.use('/fs', fsRouter)

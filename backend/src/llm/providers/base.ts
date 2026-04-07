@@ -1,6 +1,21 @@
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
+  role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+}
+
+export interface OpenAIToolDef {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
 }
 
 export interface ChatCompletionOptions {
@@ -9,10 +24,17 @@ export interface ChatCompletionOptions {
   maxTokens?: number
   stream?: boolean
   responseFormat?: 'json' | 'text'
+  tools?: OpenAIToolDef[]
+  tool_choice?: 'auto' | 'none'
 }
 
 export interface ChatCompletionResult {
   content: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
   usage?: {
     promptTokens: number
     completionTokens: number

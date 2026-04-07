@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'http'
-import type { WSMessage, WSMessageType } from '../types/index.js'
+import type { WSMessage, WSMessageType, ClientMessage, ClientMessageType } from '../types/index.js'
 import { verifyToken } from '../middleware/auth.js'
 
 interface AuthenticatedClient {
@@ -10,11 +10,13 @@ interface AuthenticatedClient {
 
 const clients = new Set<AuthenticatedClient>()
 
+type ClientMessageHandler = (payload: unknown, userId: string) => void
+const clientHandlers = new Map<string, Set<ClientMessageHandler>>()
+
 export function initWebSocket(server: Server): void {
   const wss = new WebSocketServer({ server, path: '/ws' })
 
   wss.on('connection', (ws, req) => {
-    // 从 URL query 参数提取 token
     const url = new URL(req.url ?? '', `http://${req.headers.host}`)
     const token = url.searchParams.get('token')
 
@@ -29,6 +31,20 @@ export function initWebSocket(server: Server): void {
     const client: AuthenticatedClient = { ws, userId }
     clients.add(client)
     console.log(`WebSocket client connected (userId: ${userId || 'anonymous'}, total: ${clients.size})`)
+
+    ws.on('message', (raw) => {
+      try {
+        const msg: ClientMessage = JSON.parse(raw.toString())
+        if (msg.type) {
+          const handlers = clientHandlers.get(msg.type)
+          if (handlers) {
+            handlers.forEach(h => h(msg.payload, userId))
+          }
+        }
+      } catch {
+        // 忽略非 JSON 消息
+      }
+    })
 
     ws.on('close', () => {
       clients.delete(client)
@@ -52,10 +68,20 @@ export function broadcast(type: WSMessageType, payload: unknown, userId?: string
   const data = JSON.stringify(message)
   for (const client of clients) {
     if (client.ws.readyState === WebSocket.OPEN) {
-      // 如果指定了 userId，只推送给该用户；否则广播
       if (!userId || client.userId === userId || !client.userId) {
         client.ws.send(data)
       }
     }
+  }
+}
+
+/** 注册客户端消息处理器 */
+export function onClientMessage(type: ClientMessageType, handler: ClientMessageHandler): () => void {
+  if (!clientHandlers.has(type)) {
+    clientHandlers.set(type, new Set())
+  }
+  clientHandlers.get(type)!.add(handler)
+  return () => {
+    clientHandlers.get(type)?.delete(handler)
   }
 }

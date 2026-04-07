@@ -78,6 +78,13 @@ class WebSocketClient {
     this.cleanup()
   }
 
+  /** 向服务端发送消息 */
+  send(type: string, payload: unknown) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type, payload }))
+    }
+  }
+
   private cleanup() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)

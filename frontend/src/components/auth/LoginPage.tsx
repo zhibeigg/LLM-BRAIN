@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Box, Typography, TextField, Button, Alert } from '@mui/material'
 import { Psychology as BrainIcon } from '@mui/icons-material'
 import { useAuthStore } from '../../stores/authStore'
-import { darkColors as c } from '../../theme'
+import { useColors } from '../../ThemeContext'
 
 export function LoginPage() {
+  const c = useColors()
   const login = useAuthStore((s) => s.login)
   const register = useAuthStore((s) => s.register)
 

@@ -8,9 +8,10 @@ import { Add as AddIcon, Delete as DeleteIcon, AutoAwesome as AIIcon } from '@mu
 import { usePersonalityStore } from '../../stores/personalityStore'
 import { useBrainStore } from '../../stores/brainStore'
 import { personalityApi } from '../../services/api'
-import { darkColors as c } from '../../theme'
+import { useColors } from '../../ThemeContext'
 
 export function PersonalityPanel() {
+  const c = useColors()
   const {
     dimensions, maxDimensions, loading,
     fetchDimensions, fetchMaxDimensions,

@@ -1,10 +1,9 @@
 import { Router } from 'express'
-import { learnTopic } from '../core/learning/engine.js'
-import { broadcast } from '../ws/server.js'
+import { orchestrator } from '../llm/orchestrator.js'
 
 export const learnRouter = Router()
 
-// POST /api/learn - 学习新知识
+// POST /api/learn - 学习新知识（支持排队）
 learnRouter.post('/', async (req, res) => {
   try {
     const { topic, brainId } = req.body
@@ -17,16 +16,12 @@ learnRouter.post('/', async (req, res) => {
       return
     }
 
-    // 立即返回，后台异步执行
-    res.json({ status: 'started', message: '学习已开始，请通过 WebSocket 接收进度' })
-
-    learnTopic(topic, brainId).catch(err => {
-      console.error('Learning error:', err)
-      broadcast('learning_progress', {
-        phase: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      })
-      broadcast('error', { message: err instanceof Error ? err.message : String(err) })
+    const item = orchestrator.enqueue('learn', topic, brainId)
+    const queued = orchestrator.running
+    res.json({
+      status: queued ? 'queued' : 'started',
+      queueItemId: item.id,
+      message: queued ? '学习任务已加入队列' : '学习已开始',
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)

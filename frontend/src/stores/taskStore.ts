@@ -5,10 +5,16 @@ import type {
   AgentStreamPayload,
   BossVerdictPayload,
   LearningProgressPayload,
+  QueueItem,
+  ExecutionMode,
+  PlanReadyPayload,
+  StepConfirmPayload,
 } from '../types'
 import { taskApi, learnApi, chatSessionsApi } from '../services/api'
 import type { ChatSessionDTO } from '../services/api'
 import { useBrainStore } from './brainStore'
+import { useSettingsStore } from './settingsStore'
+import { wsClient } from '../services/websocket'
 
 export interface ThinkingStep {
   id: string
@@ -57,6 +63,11 @@ interface TaskState {
   sessions: ChatSession[]
   activeSessionId: string | null
   viewingSessionId: string | null
+  queue: QueueItem[]
+  executionMode: ExecutionMode
+  autoReview: boolean
+  pendingPlan: PlanReadyPayload | null
+  pendingStep: StepConfirmPayload | null
 
   startTask: (prompt: string) => Promise<void>
   learnTopic: (topic: string) => Promise<void>
@@ -74,6 +85,16 @@ interface TaskState {
   deleteSession: (id: string) => void
   clearSessions: () => void
   loadSessions: () => Promise<void>
+  setQueue: (queue: QueueItem[]) => void
+  removeFromQueue: (id: string) => Promise<void>
+  setExecutionMode: (mode: ExecutionMode) => void
+  setAutoReview: (auto: boolean) => void
+  setPendingPlan: (plan: PlanReadyPayload | null) => void
+  setPendingStep: (step: StepConfirmPayload | null) => void
+  approvePlan: () => void
+  rejectPlan: () => void
+  approveStep: () => void
+  rejectStep: () => void
 }
 
 let agentStepIdCounter = 0
@@ -104,6 +125,11 @@ const initialState = {
   sessions: [] as ChatSession[],
   activeSessionId: null as string | null,
   viewingSessionId: null as string | null,
+  queue: [] as QueueItem[],
+  executionMode: (localStorage.getItem('llm-brain-exec-mode') as ExecutionMode) || 'auto' as ExecutionMode,
+  autoReview: localStorage.getItem('llm-brain-auto-review') === 'true',
+  pendingPlan: null as PlanReadyPayload | null,
+  pendingStep: null as StepConfirmPayload | null,
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -147,7 +173,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }))
 
     try {
-      await taskApi.execute(prompt, brainId)
+      await taskApi.execute(prompt, brainId, get().executionMode, useSettingsStore.getState().enabledTools)
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : '任务执行失败'
       set({ isRunning: false, error: errMsg })
@@ -355,5 +381,49 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     } catch (e) {
       console.error('加载会话历史失败:', e)
     }
+  },
+
+  setQueue: (queue) => set({ queue }),
+
+  removeFromQueue: async (id) => {
+    try {
+      await taskApi.removeFromQueue(id)
+      set((s) => ({ queue: s.queue.filter((q) => q.id !== id) }))
+    } catch (e) {
+      console.error('取消排队失败:', e)
+    }
+  },
+
+  setExecutionMode: (mode) => {
+    localStorage.setItem('llm-brain-exec-mode', mode)
+    set({ executionMode: mode })
+  },
+
+  setAutoReview: (auto) => {
+    localStorage.setItem('llm-brain-auto-review', String(auto))
+    set({ autoReview: auto })
+  },
+
+  setPendingPlan: (plan) => set({ pendingPlan: plan }),
+  setPendingStep: (step) => set({ pendingStep: step }),
+
+  approvePlan: () => {
+    wsClient.send('plan_response', { approved: true })
+    set({ pendingPlan: null })
+  },
+
+  rejectPlan: () => {
+    wsClient.send('plan_response', { approved: false })
+    set({ pendingPlan: null })
+  },
+
+  approveStep: () => {
+    wsClient.send('step_response', { approved: true })
+    set({ pendingStep: null })
+  },
+
+  rejectStep: () => {
+    wsClient.send('step_response', { approved: false })
+    set({ pendingStep: null })
   },
 }))

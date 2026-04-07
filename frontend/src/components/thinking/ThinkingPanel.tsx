@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
-import { Box, Typography, Chip, LinearProgress, Alert, Collapse, IconButton, Tooltip } from '@mui/material'
+import { Box, Typography, Chip, LinearProgress, Alert, Collapse, IconButton, Tooltip, Button } from '@mui/material'
 import {
   Psychology as ThinkIcon,
   Route as RouteIcon,
@@ -13,6 +13,12 @@ import {
   CheckCircleOutline as SuccessIcon,
   ErrorOutline as ErrorIcon,
   HourglassTop as RunningIcon,
+  ChevronRight as ChevronRightIcon,
+  CheckCircle as ChosenIcon,
+  Block as FilteredIcon,
+  Circle as DotIcon,
+  Close as CloseIcon,
+  Queue as QueueIcon,
 } from '@mui/icons-material'
 import { useTaskStore } from '../../stores/taskStore'
 import type { ThinkingStep, ChatSession } from '../../stores/taskStore'
@@ -23,7 +29,8 @@ import type {
   BossVerdictPayload,
   LearningProgressPayload,
 } from '../../types'
-import { darkColors as c } from '../../theme'
+import { useColors, useThemeMode } from '../../ThemeContext'
+import { MarkdownRenderer } from '../common/MarkdownRenderer'
 
 /* ── 步骤配置 ── */
 
@@ -34,6 +41,33 @@ const STEP_CONFIG = {
   boss_verdict: { icon: BossIcon, color: '#FBBF24', label: 'Boss 评审' },
   learning_progress: { icon: LearnIcon, color: '#C084FC', label: '知识学习' },
 } as const
+
+/** 步骤卡片内部颜色（跟随主题） */
+function useStepTheme() {
+  const { mode } = useThemeMode()
+  const isDark = mode === 'dark'
+  return {
+    // Islands Dark 用冷灰 + 蓝色高亮，Apple 用纯净灰
+    bodyText: isDark ? '#BCBEC4' : '#3C3C43',
+    mutedText: isDark ? '#AAACB2' : '#8E8E93',
+    dimText: isDark ? '#7A7E85' : '#AEAEB2',
+    filteredText: isDark ? '#4B5059' : '#C7C7CC',
+    brightText: isDark ? '#D1D3DA' : '#1D1D1F',
+    agentText: isDark ? '#6AAB73' : '#248A3D',
+    chipBg: isDark ? '#101012' : '#F0F0F2',
+    chipBorder: isDark ? '#2C2D31' : '#D1D1D6',
+    filteredChipBg: isDark ? '#1E1F22' : '#E8E8ED',
+    cardBg: isDark ? '#101012' : '#FFFFFF',
+    cardAgentBg: isDark ? '#0E0F10' : '#F5FFF5',
+    cardHeaderBg: isDark ? '#1E1F22' : '#F5F5F7',
+    cardHeaderAgentBg: isDark ? '#1A1C1A' : '#F0F5F0',
+    cardHeaderHover: isDark ? '#2B2D30' : '#E8E8ED',
+    cardHeaderAgentHover: isDark ? '#252825' : '#E5EDE5',
+    historyBg: isDark ? '#101012' : '#F5F5F7',
+    historyHover: isDark ? '#1E1F22' : '#E8E8ED',
+    progressBg: isDark ? '#3A3D41' : '#D1D1D6',
+  }
+}
 
 function formatTime(ts: number) {
   const d = new Date(ts)
@@ -49,108 +83,322 @@ function formatSessionTime(ts: number) {
   return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${time}`
 }
 
-/* ── 步骤内容渲染 ── */
+/** 将连续的 leader_step + leader_decision 合并为路径选择组 */
+interface MergedStep {
+  kind: 'path_choice' | 'single'
+  /** path_choice: leader_step + leader_decision */
+  leaderStep?: ThinkingStep
+  decision?: ThinkingStep
+  /** single: 其他类型 */
+  step?: ThinkingStep
+}
 
-function StepContent({ step }: { step: ThinkingStep }) {
-  switch (step.type) {
-    case 'leader_step': {
-      const data = step.data as LeaderStepPayload
-      return (
-        <>
-          <Typography style={{ color: '#c0c2d8', fontSize: 13, marginBottom: 6 }}>
-            当前:{' '}
-            <Chip
-              label={data.currentNodeId?.slice(0, 8)}
-              size="small"
-              sx={{
-                height: 20, fontSize: 11,
-                bgcolor: '#1a1b28', color: '#c0c2d8',
-                border: '1px solid #2a2c3e',
-              }}
-            />
-          </Typography>
-          {data.candidates.map((cd) => (
-            <Box
-              key={cd.edgeId}
-              sx={{
-                display: 'flex', alignItems: 'center', gap: 0.5,
-                ml: 1, mb: 0.4,
-                opacity: cd.filtered ? 0.35 : 1,
-              }}
-            >
-              <Typography
-                style={{
-                  color: cd.filtered ? '#555770' : '#e0e2f0',
-                  textDecoration: cd.filtered ? 'line-through' : 'none',
-                  fontSize: 13,
-                }}
-              >
-                → {cd.targetNodeTitle}
-              </Typography>
-              <Chip
-                label={`${cd.perceivedDifficulty.toFixed(2)}`}
-                size="small"
-                sx={{
-                  height: 18, fontSize: 10,
-                  bgcolor: cd.filtered ? '#2a2b45' : `${c.primary}20`,
-                  color: cd.filtered ? '#6C6F8A' : c.primary,
-                  border: `1px solid ${cd.filtered ? '#3a3c5c' : `${c.primary}40`}`,
-                }}
-              />
-            </Box>
-          ))}
-          {data.thinking && (
-            <Typography
-              style={{
-                color: '#9496b0', fontSize: 13,
-                marginTop: 6, fontStyle: 'italic',
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {data.thinking}
-            </Typography>
-          )}
-        </>
-      )
+function mergeSteps(steps: ThinkingStep[]): MergedStep[] {
+  const result: MergedStep[] = []
+  let i = 0
+  while (i < steps.length) {
+    const cur = steps[i]
+    if (cur.type === 'leader_step' && i + 1 < steps.length && steps[i + 1].type === 'leader_decision') {
+      result.push({ kind: 'path_choice', leaderStep: cur, decision: steps[i + 1] })
+      i += 2
+    } else if (cur.type === 'leader_step') {
+      // leader_step 还没有对应的 decision（正在思考中）
+      result.push({ kind: 'path_choice', leaderStep: cur })
+      i++
+    } else if (cur.type === 'leader_decision') {
+      // 孤立的 decision（不应该出现，兜底）
+      result.push({ kind: 'single', step: cur })
+      i++
+    } else {
+      result.push({ kind: 'single', step: cur })
+      i++
     }
-    case 'leader_decision': {
-      const data = step.data as LeaderDecisionPayload
-      return (
-        <>
+  }
+  return result
+}
+
+/* ── 路径选择卡片（合并 leader_step + leader_decision） ── */
+
+function PathChoiceCard({
+  leaderStep,
+  decision,
+  index,
+  isLast,
+  isBusy,
+}: {
+  leaderStep: ThinkingStep
+  decision?: ThinkingStep
+  index: number
+  isLast: boolean
+  isBusy: boolean
+}) {
+  const c = useColors()
+  const t = useStepTheme()
+  const [thinkingOpen, setThinkingOpen] = useState(false)
+
+  const stepData = leaderStep.data as LeaderStepPayload
+  const decisionData = decision?.data as LeaderDecisionPayload | undefined
+  const chosenEdgeId = decisionData?.chosenEdgeId
+  const isDecided = !!decision
+  const isStopped = isDecided && !chosenEdgeId
+
+  const accentColor = '#A78BFA'
+  const dotClass = isLast && isBusy ? 'step-dot step-dot--breathing' : 'step-dot'
+
+  // 找到当前节点的标题（从候选中推断）
+  const currentNodeLabel = stepData.currentNodeId?.slice(0, 8) ?? '?'
+
+  return (
+    <Box
+      sx={{
+        position: 'relative',
+        pl: 3.5,
+        pb: 2,
+        background: 'transparent',
+      }}
+    >
+      {/* 时间线竖线 */}
+      <Box
+        sx={{
+          position: 'absolute',
+          left: 10,
+          top: 0,
+          bottom: 0,
+          width: '1.5px',
+          background: isLast
+            ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)`
+            : c.border,
+          opacity: 0.6,
+        }}
+      />
+
+      {/* 时间线圆点 */}
+      <Box
+        className={dotClass}
+        sx={{
+          position: 'absolute',
+          left: 4,
+          top: 12,
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          zIndex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          '--dot-color': accentColor,
+          animationDelay: `${index * 0.06}s`,
+        }}
+      >
+        <Box sx={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1.5px solid ${accentColor}`, opacity: 0.5 }} />
+        <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: accentColor, boxShadow: `0 0 6px ${accentColor}60` }} />
+      </Box>
+
+      {/* 卡片主体 */}
+      <div
+        className="step-card"
+        style={{
+          borderRadius: 10,
+          background: t.cardBg,
+          border: `1px solid ${t.chipBorder}`,
+          overflow: 'hidden',
+          animationDelay: `${index * 0.06}s`,
+        }}
+      >
+        {/* 左侧色条 */}
+        <div
+          style={{
+            position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+            background: `linear-gradient(to bottom, ${accentColor}, ${accentColor}40)`,
+            borderRadius: '10px 0 0 10px',
+          }}
+        />
+
+        {/* 标题栏：当前节点 + 时间 */}
+        <Box
+          sx={{
+            display: 'flex', alignItems: 'center', gap: 1,
+            px: 2, py: 1,
+            background: t.cardHeaderBg,
+          }}
+        >
+          <RouteIcon sx={{ fontSize: 15, color: accentColor }} />
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: accentColor, letterSpacing: '0.02em' }}>
+            路径选择
+          </Typography>
           <Chip
-            label={data.chosenEdgeId ? `选择: ${data.chosenEdgeId.slice(0, 8)}...` : '停止'}
+            label={currentNodeLabel}
             size="small"
             sx={{
-              height: 22, fontSize: 12, mb: 0.5,
-              bgcolor: data.chosenEdgeId ? `${c.secondary}20` : '#2a2b45',
-              color: data.chosenEdgeId ? c.secondaryLight : '#9496b0',
-              border: `1px solid ${data.chosenEdgeId ? `${c.secondary}40` : '#3a3c5c'}`,
+              height: 20, fontSize: 10, fontFamily: 'monospace',
+              bgcolor: t.chipBg, color: t.bodyText,
+              border: `1px solid ${t.chipBorder}`,
             }}
           />
-          <Typography style={{ color: '#c0c2d8', fontSize: 13, whiteSpace: 'pre-wrap' }}>
-            {data.reason}
+          <Box sx={{ flex: 1 }} />
+          <Typography sx={{ fontSize: 11, color: t.dimText, fontVariantNumeric: 'tabular-nums' }}>
+            {formatTime(leaderStep.timestamp)}
           </Typography>
-        </>
-      )
-    }
+        </Box>
+
+        {/* 岔路列表 */}
+        <Box sx={{ px: 2, py: 1.5 }}>
+          {stepData.candidates.length === 0 && (
+            <Typography sx={{ fontSize: 12, color: t.mutedText, fontStyle: 'italic' }}>
+              无出边，自动停止
+            </Typography>
+          )}
+          {stepData.candidates.map((cd) => {
+            const isChosen = chosenEdgeId === cd.edgeId
+            const isFiltered = cd.filtered
+
+            return (
+              <Box
+                key={cd.edgeId}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  py: 0.6,
+                  px: 1,
+                  mb: 0.5,
+                  borderRadius: '6px',
+                  border: `1px solid ${isChosen ? `${c.success}40` : 'transparent'}`,
+                  bgcolor: isChosen ? `${c.success}08` : isFiltered ? `${c.textMuted}06` : 'transparent',
+                  opacity: isFiltered ? 0.45 : 1,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {/* 状态图标 */}
+                {isChosen ? (
+                  <ChosenIcon sx={{ fontSize: 15, color: c.success, flexShrink: 0 }} />
+                ) : isFiltered ? (
+                  <FilteredIcon sx={{ fontSize: 14, color: t.filteredText, flexShrink: 0 }} />
+                ) : isDecided ? (
+                  <DotIcon sx={{ fontSize: 6, color: t.dimText, flexShrink: 0, mx: '4.5px' }} />
+                ) : (
+                  <ChevronRightIcon sx={{ fontSize: 16, color: t.dimText, flexShrink: 0 }} />
+                )}
+
+                {/* 目标节点名 */}
+                <Typography
+                  sx={{
+                    fontSize: 13,
+                    fontWeight: isChosen ? 600 : 400,
+                    color: isChosen ? c.success : isFiltered ? t.filteredText : t.brightText,
+                    textDecoration: isFiltered ? 'line-through' : 'none',
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cd.targetNodeTitle}
+                </Typography>
+
+                {/* 难度标签 */}
+                <Chip
+                  label={cd.perceivedDifficulty.toFixed(2)}
+                  size="small"
+                  sx={{
+                    height: 18, fontSize: 10, flexShrink: 0,
+                    bgcolor: isChosen ? `${c.success}15` : isFiltered ? t.filteredChipBg : `${accentColor}15`,
+                    color: isChosen ? c.success : isFiltered ? t.filteredText : accentColor,
+                    border: `1px solid ${isChosen ? `${c.success}30` : isFiltered ? t.chipBorder : `${accentColor}30`}`,
+                  }}
+                />
+
+                {/* 难度类型 */}
+                {cd.difficultyTypes?.length > 0 && (
+                  <Box sx={{ display: 'flex', gap: 0.3 }}>
+                    {cd.difficultyTypes.slice(0, 2).map((dt) => (
+                      <Chip
+                        key={dt}
+                        label={dt}
+                        size="small"
+                        sx={{
+                          height: 16, fontSize: 9,
+                          bgcolor: 'transparent', color: t.dimText,
+                          border: `1px solid ${t.chipBorder}`,
+                          '& .MuiChip-label': { px: 0.4 },
+                        }}
+                      />
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            )
+          })}
+
+          {/* 决策结果 */}
+          {isDecided && (
+            <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${t.chipBorder}` }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <RouteIcon sx={{ fontSize: 14, color: isStopped ? t.mutedText : '#5B8DEF' }} />
+                <Typography sx={{ fontSize: 12, fontWeight: 600, color: isStopped ? t.mutedText : '#5B8DEF' }}>
+                  {isStopped ? '决定停止遍历' : '已选择路径'}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+
+          {/* 二级展开：thinking + reason */}
+          {(stepData.thinking || decisionData?.reason) && (
+            <Box sx={{ mt: 1 }}>
+              <Box
+                onClick={() => setThinkingOpen(!thinkingOpen)}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 0.5,
+                  cursor: 'pointer', userSelect: 'none',
+                  '&:hover': { '& .expand-label': { color: accentColor } },
+                }}
+              >
+                <ExpandMoreIcon
+                  sx={{
+                    fontSize: 16, color: t.dimText,
+                    transform: thinkingOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.2s',
+                  }}
+                />
+                <Typography className="expand-label" sx={{ fontSize: 11, color: t.dimText, transition: 'color 0.15s' }}>
+                  {thinkingOpen ? '收起推理过程' : '展开推理过程'}
+                </Typography>
+              </Box>
+              <Collapse in={thinkingOpen} timeout={200}>
+                <Box sx={{ mt: 0.75, pl: 1, borderLeft: `2px solid ${t.chipBorder}` }}>
+                  {stepData.thinking && (
+                    <Typography sx={{ fontSize: 12, color: t.mutedText, whiteSpace: 'pre-wrap', fontStyle: 'italic', mb: decisionData?.reason ? 1 : 0 }}>
+                      {stepData.thinking}
+                    </Typography>
+                  )}
+                  {decisionData?.reason && (
+                    <Typography sx={{ fontSize: 12, color: t.bodyText, whiteSpace: 'pre-wrap' }}>
+                      {decisionData.reason}
+                    </Typography>
+                  )}
+                </Box>
+              </Collapse>
+            </Box>
+          )}
+        </Box>
+      </div>
+    </Box>
+  )
+}
+
+/* ── 通用步骤内容渲染（agent_stream / boss_verdict / learning_progress） ── */
+
+function StepContent({ step }: { step: ThinkingStep }) {
+  const c = useColors()
+  const t = useStepTheme()
+  switch (step.type) {
     case 'agent_stream': {
       const data = step.data as AgentStreamPayload
       return (
-        <div className="agent-terminal">
-          <Typography
-            component="span"
-            style={{
-              color: '#c8f5d4',
-              whiteSpace: 'pre-wrap',
-              fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
-              fontSize: 13,
-              lineHeight: 1.7,
-            }}
-          >
-            {data.chunk}
-          </Typography>
+        <Box sx={{ position: 'relative' }}>
+          <MarkdownRenderer content={data.chunk} color={t.agentText} />
           {!data.done && <span className="agent-cursor" />}
-        </div>
+        </Box>
       )
     }
     case 'boss_verdict': {
@@ -168,11 +416,11 @@ function StepContent({ step }: { step: ThinkingStep }) {
             }}
           />
           {!data.passed && (
-            <Typography style={{ color: '#9496b0', fontSize: 13 }}>
+            <Typography style={{ color: t.mutedText, fontSize: 13 }}>
               重试: {data.retryCount}
             </Typography>
           )}
-          <Typography style={{ color: '#c0c2d8', fontSize: 13, whiteSpace: 'pre-wrap' }}>
+          <Typography style={{ color: t.bodyText, fontSize: 13, whiteSpace: 'pre-wrap' }}>
             {data.feedback}
           </Typography>
         </>
@@ -196,7 +444,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
               border: `1px solid ${phaseColor}40`,
             }}
           />
-          <Typography style={{ color: '#c0c2d8', fontSize: 13, whiteSpace: 'pre-wrap' }}>
+          <Typography style={{ color: t.bodyText, fontSize: 13, whiteSpace: 'pre-wrap' }}>
             {data.message}
           </Typography>
           {data.totalNodes != null && data.nodesCreated != null && (
@@ -206,7 +454,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
                 value={data.totalNodes > 0 ? (data.nodesCreated / data.totalNodes) * 100 : 0}
                 sx={{
                   height: 4, borderRadius: 2,
-                  bgcolor: '#3a3c5c',
+                  bgcolor: t.progressBg,
                   animation: 'progressGlow 2s ease-in-out infinite',
                   '& .MuiLinearProgress-bar': {
                     bgcolor: '#C084FC',
@@ -225,7 +473,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
   }
 }
 
-/* ── 步骤卡片 ── */
+/* ── 通用步骤卡片（非路径选择类型） ── */
 
 function StepCard({
   step,
@@ -238,6 +486,8 @@ function StepCard({
   isLast: boolean
   isBusy: boolean
 }) {
+  const c = useColors()
+  const t = useStepTheme()
   const [expanded, setExpanded] = useState(true)
   const config = STEP_CONFIG[step.type]
   const Icon = config.icon
@@ -253,76 +503,36 @@ function StepCard({
 
   const isVerdict = step.type === 'boss_verdict'
   const isAgent = step.type === 'agent_stream'
-  const accentBarColor = accentColor
   const cardClass = isVerdict ? 'step-card step-card--verdict' : 'step-card'
   const dotClass = isLast && isBusy ? 'step-dot step-dot--breathing' : 'step-dot'
 
   return (
-    <Box
-      sx={{
-        position: 'relative',
-        pl: 3.5,
-        pb: 2,
-        background: 'transparent',
-      }}
-    >
+    <Box sx={{ position: 'relative', pl: 3.5, pb: 2, background: 'transparent' }}>
       <Box
         sx={{
-          position: 'absolute',
-          left: 10,
-          top: 0,
-          bottom: 0,
-          width: '1.5px',
-          background: isLast
-            ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)`
-            : c.border,
+          position: 'absolute', left: 10, top: 0, bottom: 0, width: '1.5px',
+          background: isLast ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)` : c.border,
           opacity: 0.6,
         }}
       />
-
       <Box
         className={dotClass}
         sx={{
-          position: 'absolute',
-          left: 4,
-          top: 12,
-          width: 14,
-          height: 14,
-          borderRadius: '50%',
-          zIndex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          '--dot-color': accentColor,
-          animationDelay: `${index * 0.06}s`,
+          position: 'absolute', left: 4, top: 12, width: 14, height: 14,
+          borderRadius: '50%', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          '--dot-color': accentColor, animationDelay: `${index * 0.06}s`,
         }}
       >
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            borderRadius: '50%',
-            border: `1.5px solid ${accentColor}`,
-            opacity: 0.5,
-          }}
-        />
-        <Box
-          sx={{
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            bgcolor: accentColor,
-            boxShadow: `0 0 6px ${accentColor}60`,
-          }}
-        />
+        <Box sx={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1.5px solid ${accentColor}`, opacity: 0.5 }} />
+        <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: accentColor, boxShadow: `0 0 6px ${accentColor}60` }} />
       </Box>
 
       <div
         className={cardClass}
         style={{
           borderRadius: 10,
-          background: isAgent ? '#0c0d17' : '#141520',
-          border: `1px solid ${isVerdict ? accentColor : '#2a2c3e'}`,
+          background: isAgent ? t.cardAgentBg : t.cardBg,
+          border: `1px solid ${isVerdict ? accentColor : t.chipBorder}`,
           overflow: 'hidden',
           animationDelay: `${index * 0.06}s`,
           // @ts-expect-error CSS custom property
@@ -331,60 +541,37 @@ function StepCard({
       >
         <div
           style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 3,
-            background: `linear-gradient(to bottom, ${accentBarColor}, ${accentBarColor}40)`,
+            position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+            background: `linear-gradient(to bottom, ${accentColor}, ${accentColor}40)`,
             borderRadius: '10px 0 0 10px',
           }}
         />
-
         <div
           onClick={() => setExpanded(!expanded)}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 14px 8px 16px',
-            cursor: 'pointer',
-            background: isAgent ? '#0e0f1a' : '#1a1b28',
-            transition: 'background 0.15s',
-            position: 'relative',
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 14px 8px 16px', cursor: 'pointer',
+            background: isAgent ? t.cardHeaderAgentBg : t.cardHeaderBg,
+            transition: 'background 0.15s', position: 'relative',
           }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = isAgent ? '#12131f' : '#1f2030'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = isAgent ? '#0e0f1a' : '#1a1b28'
-          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = isAgent ? t.cardHeaderAgentHover : t.cardHeaderHover }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = isAgent ? t.cardHeaderAgentBg : t.cardHeaderBg }}
         >
           <Icon sx={{ fontSize: 16 }} style={{ color: accentColor }} />
-          <span
-            style={{
-              fontWeight: 600,
-              color: accentColor,
-              flex: 1,
-              fontSize: 13,
-              letterSpacing: '0.02em',
-            }}
-          >
+          <span style={{ fontWeight: 600, color: accentColor, flex: 1, fontSize: 13, letterSpacing: '0.02em' }}>
             {config.label}
           </span>
-          <span style={{ color: '#666880', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: t.dimText, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
             {formatTime(step.timestamp)}
           </span>
           <ExpandMoreIcon
             sx={{
-              fontSize: 18,
-              color: '#666880',
+              fontSize: 18, color: t.dimText,
               transform: expanded ? 'rotate(180deg)' : 'none',
               transition: 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           />
         </div>
-
         <Collapse in={expanded} timeout={250}>
           <div style={{ padding: '6px 14px 12px 16px', position: 'relative' }}>
             <StepContent step={step} />
@@ -398,18 +585,12 @@ function StepCard({
 /* ── 历史会话条目 ── */
 
 function SessionItem({
-  session,
-  isActive,
-  isViewing,
-  onClick,
-  onDelete,
+  session, isActive, isViewing, onClick, onDelete,
 }: {
-  session: ChatSession
-  isActive: boolean
-  isViewing: boolean
-  onClick: () => void
-  onDelete: () => void
+  session: ChatSession; isActive: boolean; isViewing: boolean; onClick: () => void; onDelete: () => void
 }) {
+  const c = useColors()
+  const t = useStepTheme()
   const statusIcon = session.status === 'running'
     ? <RunningIcon sx={{ fontSize: 14, color: c.warning }} />
     : session.status === 'success'
@@ -418,78 +599,37 @@ function SessionItem({
 
   const typeColor = session.type === 'learn' ? '#C084FC' : c.primary
   const displayPrompt = session.type === 'learn' && session.prompt.startsWith('学习: ')
-    ? session.prompt.slice(4)
-    : session.prompt
+    ? session.prompt.slice(4) : session.prompt
 
   return (
     <Box
       onClick={onClick}
       sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 1,
-        px: 1.5,
-        py: 1,
-        cursor: 'pointer',
-        borderRadius: '8px',
+        display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1,
+        cursor: 'pointer', borderRadius: '8px',
         border: `1px solid ${isViewing ? typeColor + '40' : 'transparent'}`,
         bgcolor: isViewing ? typeColor + '08' : isActive ? `${c.primary}05` : 'transparent',
         transition: 'all 0.15s',
-        '&:hover': {
-          bgcolor: isViewing ? typeColor + '12' : '#1f2030',
-        },
+        '&:hover': { bgcolor: isViewing ? typeColor + '12' : t.historyHover },
         mb: 0.5,
       }}
     >
-      {/* 类型指示条 */}
-      <Box
-        sx={{
-          width: 3,
-          height: 28,
-          borderRadius: 2,
-          bgcolor: typeColor,
-          opacity: isViewing ? 1 : 0.4,
-          flexShrink: 0,
-        }}
-      />
-
+      <Box sx={{ width: 3, height: 28, borderRadius: 2, bgcolor: typeColor, opacity: isViewing ? 1 : 0.4, flexShrink: 0 }} />
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography
-          sx={{
-            fontSize: 12.5,
-            color: isViewing ? c.text : c.textSecondary,
-            fontWeight: isViewing ? 500 : 400,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            lineHeight: 1.3,
-          }}
-        >
+        <Typography sx={{ fontSize: 12.5, color: isViewing ? c.text : c.textSecondary, fontWeight: isViewing ? 500 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
           {displayPrompt}
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
           {statusIcon}
-          <Typography sx={{ fontSize: 11, color: c.textMuted }}>
-            {formatSessionTime(session.timestamp)}
-          </Typography>
-          <Typography sx={{ fontSize: 11, color: c.textMuted }}>
-            · {session.thinkingSteps.length} 步
-          </Typography>
+          <Typography sx={{ fontSize: 11, color: c.textMuted }}>{formatSessionTime(session.timestamp)}</Typography>
+          <Typography sx={{ fontSize: 11, color: c.textMuted }}>· {session.thinkingSteps.length} 步</Typography>
         </Box>
       </Box>
-
-      {/* 删除按钮 */}
       {!isActive && (
         <IconButton
           size="small"
           onClick={(e) => { e.stopPropagation(); onDelete() }}
-          sx={{
-            p: 0.25,
-            color: c.textMuted,
-            opacity: 0,
-            '.MuiBox-root:hover > &': { opacity: 1 },
-            '&:hover': { color: c.error },
-          }}
+          sx={{ p: 0.25, color: c.textMuted, opacity: 0, '.MuiBox-root:hover > &': { opacity: 1 }, '&:hover': { color: c.error } }}
         >
           <DeleteIcon sx={{ fontSize: 14 }} />
         </IconButton>
@@ -501,55 +641,76 @@ function SessionItem({
 /* ── 空状态 ── */
 
 function EmptyState() {
+  const c = useColors()
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        gap: 2,
-        userSelect: 'none',
-      }}
-    >
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 2, userSelect: 'none' }}>
       <Box sx={{ position: 'relative', width: 64, height: 64 }}>
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            borderRadius: '50%',
-            border: `1px solid ${c.primary}`,
-            animation: 'emptyRing 3s ease-in-out infinite',
-          }}
-        />
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 8,
-            borderRadius: '50%',
-            border: `1px solid ${c.primary}`,
-            animation: 'emptyRing 3s ease-in-out infinite 0.4s',
-          }}
-        />
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 16,
-            borderRadius: '50%',
-            bgcolor: `${c.primary}15`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            animation: 'emptyPulse 3s ease-in-out infinite',
-          }}
-        >
+        <Box sx={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1px solid ${c.primary}`, animation: 'emptyRing 3s ease-in-out infinite' }} />
+        <Box sx={{ position: 'absolute', inset: 8, borderRadius: '50%', border: `1px solid ${c.primary}`, animation: 'emptyRing 3s ease-in-out infinite 0.4s' }} />
+        <Box sx={{ position: 'absolute', inset: 16, borderRadius: '50%', bgcolor: `${c.primary}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'emptyPulse 3s ease-in-out infinite' }}>
           <ThinkIcon sx={{ fontSize: 20, color: c.primary, opacity: 0.6 }} />
         </Box>
       </Box>
-      <Typography sx={{ color: c.textMuted, fontSize: 13, letterSpacing: '0.08em' }}>
-        等待指令...
-      </Typography>
+      <Typography sx={{ color: c.textMuted, fontSize: 13, letterSpacing: '0.08em' }}>等待指令...</Typography>
+    </Box>
+  )
+}
+
+/* ── Prompt 区域（支持展开/收起） ── */
+
+function PromptCard({ prompt, isHistory }: { prompt: string; isHistory: boolean }) {
+  const c = useColors()
+  const t = useStepTheme()
+  const [expanded, setExpanded] = useState(true)
+  const isLearn = prompt.startsWith('学习:') || prompt.startsWith('学习: ')
+  const label = isLearn ? '学习主题' : '任务'
+  const displayText = isLearn && prompt.startsWith('学习: ') ? prompt.slice(4) : prompt
+  const isLong = displayText.length > 80
+
+  return (
+    <Box
+      sx={{
+        mb: 2, borderRadius: '10px',
+        bgcolor: isHistory ? t.cardBg : `${c.primary}08`,
+        border: `1px solid ${isHistory ? c.border : `${c.primary}20`}`,
+        overflow: 'hidden',
+      }}
+    >
+      <Box
+        onClick={() => isLong && setExpanded(!expanded)}
+        sx={{
+          display: 'flex', alignItems: 'center', gap: 1,
+          px: 2, py: 1.25,
+          cursor: isLong ? 'pointer' : 'default',
+        }}
+      >
+        <Typography sx={{ fontSize: 12, color: c.textMuted }}>{label}</Typography>
+        <Box sx={{ flex: 1 }} />
+        {isLong && (
+          <ExpandMoreIcon
+            sx={{
+              fontSize: 16, color: c.textMuted,
+              transform: expanded ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.2s',
+            }}
+          />
+        )}
+      </Box>
+      {isLong ? (
+        <Collapse in={expanded} timeout={200}>
+          <Box sx={{ px: 2, pb: 1.5 }}>
+            <Typography sx={{ fontSize: 14, color: c.text, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
+              {displayText}
+            </Typography>
+          </Box>
+        </Collapse>
+      ) : (
+        <Box sx={{ px: 2, pb: 1.5, mt: -0.5 }}>
+          <Typography sx={{ fontSize: 14, color: c.text, fontWeight: 500 }}>
+            {displayText}
+          </Typography>
+        </Box>
+      )}
     </Box>
   )
 }
@@ -557,6 +718,8 @@ function EmptyState() {
 /* ── 主面板 ── */
 
 export function ThinkingPanel() {
+  const c = useColors()
+  const t = useStepTheme()
   const isRunning = useTaskStore((s) => s.isRunning)
   const isLearning = useTaskStore((s) => s.isLearning)
   const thinkingSteps = useTaskStore((s) => s.thinkingSteps)
@@ -567,38 +730,43 @@ export function ThinkingPanel() {
   const viewingSessionId = useTaskStore((s) => s.viewingSessionId)
   const viewSession = useTaskStore((s) => s.viewSession)
   const deleteSession = useTaskStore((s) => s.deleteSession)
+  const queue = useTaskStore((s) => s.queue)
+  const removeFromQueue = useTaskStore((s) => s.removeFromQueue)
+  const pendingPlan = useTaskStore((s) => s.pendingPlan)
+  const pendingStep = useTaskStore((s) => s.pendingStep)
+  const approvePlan = useTaskStore((s) => s.approvePlan)
+  const rejectPlan = useTaskStore((s) => s.rejectPlan)
+  const approveStep = useTaskStore((s) => s.approveStep)
+  const rejectStep = useTaskStore((s) => s.rejectStep)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomAnchorRef = useRef<HTMLDivElement>(null)
-
   const [historyOpen, setHistoryOpen] = useState(false)
 
   const busy = isRunning || isLearning
 
-  // 正在查看的历史会话
   const viewingSession = useMemo(() => {
     if (!viewingSessionId) return null
     return sessions.find((s) => s.id === viewingSessionId) ?? null
   }, [viewingSessionId, sessions])
 
-  // 当前显示的步骤和提示
   const displaySteps = viewingSession ? viewingSession.thinkingSteps : thinkingSteps
   const displayPrompt = viewingSession ? viewingSession.prompt : currentTaskPrompt
   const isViewingHistory = viewingSession !== null
 
-  // 已完成的历史会话（不含当前运行中的）
   const historySessions = useMemo(() => {
     return sessions.filter((s) => s.status !== 'running').reverse()
   }, [sessions])
 
-  // 平滑滚动到底部（仅当前活跃会话）
+  // 合并步骤
+  const mergedSteps = useMemo(() => mergeSteps(displaySteps), [displaySteps])
+
   useEffect(() => {
     if (!isViewingHistory && bottomAnchorRef.current) {
       bottomAnchorRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
   }, [thinkingSteps.length, isViewingHistory])
 
-  // 切换到查看历史时滚动到顶部
   useEffect(() => {
     if (isViewingHistory && scrollRef.current) {
       scrollRef.current.scrollTop = 0
@@ -618,31 +786,19 @@ export function ThinkingPanel() {
         {isViewingHistory ? (
           <>
             <Tooltip title="返回当前">
-              <IconButton
-                size="small"
-                onClick={() => viewSession(null)}
-                sx={{ p: 0.25, color: c.textSecondary, '&:hover': { color: c.primary } }}
-              >
+              <IconButton size="small" onClick={() => viewSession(null)} sx={{ p: 0.25, color: c.textSecondary, '&:hover': { color: c.primary } }}>
                 <BackIcon sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
-            <Typography sx={{ fontWeight: 600, color: c.textSecondary, fontSize: 15 }}>
-              历史记录
-            </Typography>
+            <Typography sx={{ fontWeight: 600, color: c.textSecondary, fontSize: 15 }}>历史记录</Typography>
           </>
         ) : (
           <>
             <ThinkIcon sx={{ fontSize: 18, color: c.primary }} />
-            <Typography sx={{ fontWeight: 600, color: c.text, fontSize: 15 }}>
-              思考过程
-            </Typography>
+            <Typography sx={{ fontWeight: 600, color: c.text, fontSize: 15 }}>思考过程</Typography>
             <Box
               sx={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                bgcolor: statusColor,
-                ml: 0.5,
+                width: 7, height: 7, borderRadius: '50%', bgcolor: statusColor, ml: 0.5,
                 '--status-color': statusColor,
                 animation: busy ? 'statusPulse 1.5s ease-in-out infinite' : 'none',
                 transition: 'background-color 0.3s',
@@ -650,10 +806,7 @@ export function ThinkingPanel() {
             />
           </>
         )}
-
         <Box sx={{ flex: 1 }} />
-
-        {/* 历史按钮 */}
         {historySessions.length > 0 && (
           <Tooltip title={historyOpen ? '收起历史' : '展开历史'}>
             <IconButton
@@ -674,22 +827,9 @@ export function ThinkingPanel() {
 
       {/* 历史会话列表 */}
       <Collapse in={historyOpen && historySessions.length > 0} timeout={200}>
-        <Box
-          sx={{
-            mb: 2,
-            maxHeight: 220,
-            overflowY: 'auto',
-            borderRadius: '10px',
-            border: `1px solid ${c.border}`,
-            bgcolor: '#0f1019',
-            p: 1,
-            flexShrink: 0,
-          }}
-        >
+        <Box sx={{ mb: 2, maxHeight: 220, overflowY: 'auto', borderRadius: '10px', border: `1px solid ${c.border}`, bgcolor: t.historyBg, p: 1, flexShrink: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, px: 0.5 }}>
-            <Typography sx={{ fontSize: 11, color: c.textMuted, fontWeight: 500 }}>
-              历史会话 ({historySessions.length})
-            </Typography>
+            <Typography sx={{ fontSize: 11, color: c.textMuted, fontWeight: 500 }}>历史会话 ({historySessions.length})</Typography>
           </Box>
           {historySessions.map((session) => (
             <SessionItem
@@ -708,11 +848,7 @@ export function ThinkingPanel() {
       {busy && !isViewingHistory && (
         <LinearProgress
           sx={{
-            mb: 1.5,
-            borderRadius: 2,
-            height: 2,
-            bgcolor: 'transparent',
-            flexShrink: 0,
+            mb: 1.5, borderRadius: 2, height: 2, bgcolor: 'transparent', flexShrink: 0,
             '& .MuiLinearProgress-bar': {
               bgcolor: isLearning ? '#C084FC' : c.primary,
               boxShadow: `0 0 8px ${isLearning ? '#C084FC' : c.primary}80`,
@@ -721,67 +857,162 @@ export function ThinkingPanel() {
         />
       )}
 
+      {/* 排队任务 */}
+      {queue.length > 0 && !isViewingHistory && (
+        <Box sx={{ mb: 1.5, flexShrink: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+            <QueueIcon sx={{ fontSize: 14, color: c.warning }} />
+            <Typography sx={{ fontSize: 11, color: c.textMuted, fontWeight: 500 }}>
+              排队中 ({queue.length})
+            </Typography>
+          </Box>
+          {queue.map((item) => (
+            <Box
+              key={item.id}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1,
+                px: 1.5, py: 0.75, mb: 0.5,
+                borderRadius: '6px',
+                border: `1px solid ${c.warning}25`,
+                bgcolor: `${c.warning}06`,
+              }}
+            >
+              <Box sx={{ width: 3, height: 20, borderRadius: 2, bgcolor: item.type === 'learn' ? '#C084FC' : c.primary, opacity: 0.5, flexShrink: 0 }} />
+              <Typography sx={{ fontSize: 12, color: c.textSecondary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {item.prompt}
+              </Typography>
+              <IconButton
+                size="small"
+                onClick={() => removeFromQueue(item.id)}
+                sx={{ p: 0.25, color: c.textMuted, '&:hover': { color: c.error } }}
+              >
+                <CloseIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Box>
+          ))}
+        </Box>
+      )}
+
       {error && !isViewingHistory && (
         <Alert
           severity="error"
           sx={{
-            mb: 1.5, fontSize: 13,
-            bgcolor: `${c.error}10`, color: c.error,
-            border: `1px solid ${c.error}30`,
-            '& .MuiAlert-icon': { color: c.error },
-            flexShrink: 0,
+            mb: 1.5, fontSize: 13, bgcolor: `${c.error}10`, color: c.error,
+            border: `1px solid ${c.error}30`, '& .MuiAlert-icon': { color: c.error }, flexShrink: 0,
           }}
         >
           {error}
         </Alert>
       )}
 
-      {/* 滚动区域 + 渐变遮罩 */}
-      <Box
-        className="thinking-scroll-container"
-        sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}
-      >
-        <Box
-          ref={scrollRef}
-          sx={{
-            height: '100%',
-            overflowY: 'auto',
-            pr: 0.5,
-            pt: 0.5,
-          }}
-        >
-          {displayPrompt && (
-            <Box
-              sx={{
-                mb: 2, p: 2,
-                borderRadius: '10px',
-                bgcolor: isViewingHistory ? '#141520' : `${c.primary}08`,
-                border: `1px solid ${isViewingHistory ? c.border : `${c.primary}20`}`,
-              }}
+      {/* 计划审批卡片 */}
+      {pendingPlan && (
+        <Box sx={{
+          mb: 1.5, p: 2, borderRadius: '10px', flexShrink: 0,
+          bgcolor: `${c.secondary}08`, border: `1px solid ${c.secondary}30`,
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+            <RouteIcon sx={{ fontSize: 16, color: c.secondary }} />
+            <Typography sx={{ fontSize: 13, fontWeight: 600, color: c.secondary }}>执行计划待确认</Typography>
+          </Box>
+          <Typography sx={{ fontSize: 12, color: c.textSecondary, mb: 1 }}>
+            任务：{pendingPlan.taskPrompt}
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1.5 }}>
+            {pendingPlan.path.map((node, i) => (
+              <Box key={node.nodeId} sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+                {i > 0 && <Typography sx={{ fontSize: 11, color: c.textMuted }}>→</Typography>}
+                <Chip
+                  label={node.nodeTitle}
+                  size="small"
+                  sx={{
+                    height: 22, fontSize: 11,
+                    bgcolor: node.nodeType === 'personality' ? `${c.primary}15` : `${c.secondary}15`,
+                    color: node.nodeType === 'personality' ? c.primary : c.secondary,
+                    border: `1px solid ${node.nodeType === 'personality' ? `${c.primary}30` : `${c.secondary}30`}`,
+                  }}
+                />
+              </Box>
+            ))}
+          </Box>
+          <Typography sx={{ fontSize: 11, color: c.textMuted, mb: 1.5 }}>
+            共 {pendingPlan.totalSteps} 步，{pendingPlan.path.length} 个节点
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="contained" size="small"
+              onClick={approvePlan}
+              sx={{ fontSize: 12, textTransform: 'none', bgcolor: c.success, '&:hover': { bgcolor: '#16A34A' } }}
             >
-              <Typography sx={{ fontSize: 12, color: c.textMuted, mb: 0.5 }}>
-                {displayPrompt.startsWith('学习:') ? '学习主题' : '任务'}
-              </Typography>
-              <Typography sx={{ fontSize: 14, color: c.text, fontWeight: 500 }}>
-                {displayPrompt.startsWith('学习: ')
-                  ? displayPrompt.slice(4)
-                  : displayPrompt}
-              </Typography>
-            </Box>
-          )}
+              批准执行
+            </Button>
+            <Button
+              variant="outlined" size="small"
+              onClick={rejectPlan}
+              sx={{ fontSize: 12, textTransform: 'none', borderColor: c.error, color: c.error, '&:hover': { bgcolor: `${c.error}10` } }}
+            >
+              拒绝
+            </Button>
+          </Box>
+        </Box>
+      )}
 
-          {displaySteps.length === 0 && !displayPrompt ? (
+      {/* 步骤确认卡片 */}
+      {pendingStep && (
+        <Box sx={{
+          mb: 1.5, p: 1.5, borderRadius: '8px', flexShrink: 0,
+          bgcolor: `${c.warning}08`, border: `1px solid ${c.warning}30`,
+          display: 'flex', alignItems: 'center', gap: 1.5,
+        }}>
+          <Typography sx={{ fontSize: 12, color: c.text, flex: 1 }}>
+            {pendingStep.description}
+          </Typography>
+          <Button size="small" variant="contained" onClick={approveStep}
+            sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, bgcolor: c.success, '&:hover': { bgcolor: '#16A34A' } }}>
+            允许
+          </Button>
+          <Button size="small" variant="outlined" onClick={rejectStep}
+            sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, borderColor: c.error, color: c.error }}>
+            拒绝
+          </Button>
+        </Box>
+      )}
+
+      {/* 滚动区域 */}
+      <Box className="thinking-scroll-container" sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <Box ref={scrollRef} sx={{ height: '100%', overflowY: 'auto', pr: 0.5, pt: 0.5 }}>
+          {displayPrompt && <PromptCard prompt={displayPrompt} isHistory={isViewingHistory} />}
+
+          {mergedSteps.length === 0 && !displayPrompt ? (
             <EmptyState />
           ) : (
-            displaySteps.map((step, i) => (
-              <StepCard
-                key={step.id}
-                step={step}
-                index={i}
-                isLast={i === displaySteps.length - 1}
-                isBusy={!isViewingHistory && busy}
-              />
-            ))
+            mergedSteps.map((merged, i) => {
+              const isLast = i === mergedSteps.length - 1
+              if (merged.kind === 'path_choice' && merged.leaderStep) {
+                return (
+                  <PathChoiceCard
+                    key={merged.leaderStep.id}
+                    leaderStep={merged.leaderStep}
+                    decision={merged.decision}
+                    index={i}
+                    isLast={isLast}
+                    isBusy={!isViewingHistory && busy}
+                  />
+                )
+              }
+              if (merged.step) {
+                return (
+                  <StepCard
+                    key={merged.step.id}
+                    step={merged.step}
+                    index={i}
+                    isLast={isLast}
+                    isBusy={!isViewingHistory && busy}
+                  />
+                )
+              }
+              return null
+            })
           )}
 
           <div ref={bottomAnchorRef} />

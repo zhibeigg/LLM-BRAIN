@@ -10,6 +10,9 @@ import type {
   BossVerdictPayload,
   LearningProgressPayload,
   NodeExtractedPayload,
+  QueueItem,
+  PlanReadyPayload,
+  StepConfirmPayload,
 } from '../types'
 
 let idCounter = 0
@@ -24,6 +27,9 @@ export function useWebSocket() {
   const setIsRunning = useTaskStore((s) => s.setIsRunning)
   const setIsLearning = useTaskStore((s) => s.setIsLearning)
   const setError = useTaskStore((s) => s.setError)
+  const setQueue = useTaskStore((s) => s.setQueue)
+  const setPendingPlan = useTaskStore((s) => s.setPendingPlan)
+  const setPendingStep = useTaskStore((s) => s.setPendingStep)
   const fetchGraph = useGraphStore((s) => s.fetchGraph)
   const addNewNodeId = useGraphStore((s) => s.addNewNodeId)
 
@@ -103,6 +109,32 @@ export function useWebSocket() {
       fetchGraph()
     })
 
+    const unsubQueueUpdate = wsClient.on('queue_update', (msg: WSMessage) => {
+      const payload = msg.payload as { queue: QueueItem[] }
+      setQueue(payload.queue)
+    })
+
+    const unsubPlanReady = wsClient.on('plan_ready', (msg: WSMessage) => {
+      const payload = msg.payload as PlanReadyPayload
+      // 如果 autoReview 开启，自动批准
+      const state = useTaskStore.getState()
+      if (state.autoReview) {
+        wsClient.send('plan_response', { approved: true })
+      } else {
+        setPendingPlan(payload)
+      }
+    })
+
+    const unsubStepConfirm = wsClient.on('step_confirm', (msg: WSMessage) => {
+      const payload = msg.payload as StepConfirmPayload
+      const state = useTaskStore.getState()
+      if (state.autoReview) {
+        wsClient.send('step_response', { approved: true })
+      } else {
+        setPendingStep(payload)
+      }
+    })
+
     const unsubError = wsClient.on('error', (msg: WSMessage) => {
       const payload = msg.payload as { message: string }
       setError(payload.message)
@@ -118,8 +150,11 @@ export function useWebSocket() {
       unsubEvolution()
       unsubNodeExtracted()
       unsubExtractionDone()
+      unsubQueueUpdate()
+      unsubPlanReady()
+      unsubStepConfirm()
       unsubError()
       wsClient.disconnect()
     }
-  }, [addThinkingStep, mergeAgentStream, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, fetchGraph, addNewNodeId])
+  }, [addThinkingStep, mergeAgentStream, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, fetchGraph, addNewNodeId])
 }

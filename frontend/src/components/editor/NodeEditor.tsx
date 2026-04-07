@@ -6,7 +6,7 @@ import {
 } from '@mui/material'
 import { Close as CloseIcon, Save as SaveIcon, Delete as DeleteIcon } from '@mui/icons-material'
 import { useGraphStore } from '../../stores/graphStore'
-import { darkColors as c } from '../../theme'
+import { useColors } from '../../ThemeContext'
 
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN', {
@@ -16,6 +16,7 @@ function formatTimestamp(ts: number): string {
 }
 
 export function NodeEditor() {
+  const c = useColors()
   const { nodes, selectedNodeId, selectNode, updateNode, deleteNode } = useGraphStore()
   const node = nodes.find((n) => n.id === selectedNodeId) ?? null
 

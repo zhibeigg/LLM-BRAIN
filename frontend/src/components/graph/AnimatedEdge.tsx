@@ -6,6 +6,7 @@ interface AnimatedEdgeData {
   baseDifficulty: number
   difficultyTypes: string[]
   active: boolean
+  animate?: boolean
   thinkingContent?: string
   [key: string]: unknown
 }
@@ -46,6 +47,7 @@ function AnimatedEdgeInner(props: EdgeProps) {
   const data = (props.data || {}) as AnimatedEdgeData
   const difficulty = data.perceivedDifficulty ?? data.baseDifficulty ?? 0.5
   const active = data.active ?? false
+  const animate = data.animate !== false
 
   const [edgePath] = getBezierPath({
     sourceX,
@@ -79,7 +81,7 @@ function AnimatedEdgeInner(props: EdgeProps) {
       />
 
       {/* 活跃时的流动粒子 */}
-      {active && (
+      {active && animate && (
         <>
           <defs>
             <filter id={`glow-${id}`} x="-50%" y="-50%" width="200%" height="200%">

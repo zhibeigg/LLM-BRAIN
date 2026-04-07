@@ -1,6 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Box, Typography, IconButton, Tooltip, CircularProgress } from '@mui/material'
-import { Settings as SettingsIcon, Logout as LogoutIcon } from '@mui/icons-material'
+import { Box, Typography, IconButton, Tooltip, CircularProgress, Button } from '@mui/material'
+import {
+  Settings as SettingsIcon, Logout as LogoutIcon,
+  Psychology as BrainIcon, Add as AddIcon,
+} from '@mui/icons-material'
 import { GraphCanvas } from './components/graph'
 import { PersonalityPanel } from './components/personality'
 import { NodeEditor } from './components/editor'
@@ -12,12 +15,14 @@ import { BrainSelector } from './components/brain'
 import { LoginPage } from './components/auth'
 import { useGraphStore } from './stores/graphStore'
 import { useAuthStore } from './stores/authStore'
+import { useBrainStore } from './stores/brainStore'
 import { useTaskStore } from './stores/taskStore'
 import { useWebSocket } from './hooks/useWebSocket'
-import { darkColors as c } from './theme'
+import { useColors } from './ThemeContext'
 
 /** 可拖拽分割线 */
 function DragHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
+  const c = useColors()
   const dragging = useRef(false)
   const lastX = useRef(0)
 
@@ -82,14 +87,52 @@ const LEFT_MAX = 400
 const GRAPH_MIN = 340
 const CHAT_MIN = 340
 
+/** 无大脑时的引导页 */
+function NoBrainGuide({ onOpenCreate }: { onOpenCreate: () => void }) {
+  const c = useColors()
+  return (
+    <Box sx={{
+      flex: 1, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 2.5,
+      bgcolor: c.bg,
+    }}>
+      <Box sx={{
+        width: 72, height: 72, borderRadius: '50%',
+        bgcolor: `${c.primary}12`, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        <BrainIcon sx={{ fontSize: 36, color: c.primary }} />
+      </Box>
+      <Typography sx={{ fontSize: 20, fontWeight: 700, color: c.text }}>
+        还没有大脑
+      </Typography>
+      <Typography sx={{ fontSize: 14, color: c.textMuted, textAlign: 'center', maxWidth: 360 }}>
+        创建一个大脑来开始使用。大脑是你的知识图谱容器，可以学习知识、执行任务、积累记忆。
+      </Typography>
+      <Button
+        variant="contained"
+        startIcon={<AddIcon />}
+        onClick={onOpenCreate}
+        sx={{ mt: 1, textTransform: 'none', fontWeight: 600, px: 3, py: 1 }}
+      >
+        创建第一个大脑
+      </Button>
+    </Box>
+  )
+}
+
 function MainApp() {
   useWebSocket()
+  const c = useColors()
 
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const loadSessions = useTaskStore((s) => s.loadSessions)
+  const currentBrainId = useBrainStore((s) => s.currentBrainId)
+  const brainsLoading = useBrainStore((s) => s.loading)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [createCount, setCreateCount] = useState(0)
 
   const [leftWidth, setLeftWidth] = useState(LEFT_WIDTH)
   const [graphWidth, setGraphWidth] = useState(480)
@@ -171,6 +214,7 @@ function MainApp() {
 
       {/* 主内容区 */}
       <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* 左栏：大脑选择器始终显示 */}
         <Box
           sx={{
             width: leftWidth,
@@ -181,55 +225,64 @@ function MainApp() {
           }}
         >
           <Box sx={{ px: 1.5, py: 1.5, borderBottom: `1px solid ${c.border}` }}>
-            <BrainSelector />
+            <BrainSelector requestCreate={createCount} />
           </Box>
-          <Box sx={{ flex: 1, overflowY: 'auto' }}>
-            <PersonalityPanel />
-          </Box>
+          {currentBrainId && (
+            <Box sx={{ flex: 1, overflowY: 'auto' }}>
+              <PersonalityPanel />
+            </Box>
+          )}
         </Box>
 
         <DragHandle onDrag={handleLeftDrag} />
 
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: CHAT_MIN,
-            display: 'flex',
-            flexDirection: 'column',
-            bgcolor: c.bgPanel,
-          }}
-        >
-          <Box sx={{ flex: 1, overflowY: 'auto' }}>
-            <ThinkingPanel />
-          </Box>
-          <ChatInput />
-        </Box>
-
-        <DragHandle onDrag={handleRightDrag} />
-
-        <Box sx={{ width: graphWidth, flexShrink: 0, position: 'relative', bgcolor: c.bg }}>
-          <GraphCanvas />
-
-          {selectedNodeId && (
+        {/* 无大脑时显示引导页 */}
+        {!currentBrainId && !brainsLoading ? (
+          <NoBrainGuide onOpenCreate={() => setCreateCount(c => c + 1)} />
+        ) : (
+          <>
             <Box
               sx={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                width: 340,
-                maxHeight: 'calc(100% - 24px)',
-                overflowY: 'auto',
-                borderRadius: '10px',
-                border: `1px solid ${c.border}`,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-                zIndex: 10,
-                bgcolor: c.bgCard,
+                flex: 1,
+                minWidth: CHAT_MIN,
+                display: 'flex',
+                flexDirection: 'column',
+                bgcolor: c.bgPanel,
               }}
             >
-              <NodeEditor />
+              <Box sx={{ flex: 1, overflowY: 'auto' }}>
+                <ThinkingPanel />
+              </Box>
+              <ChatInput />
             </Box>
-          )}
-        </Box>
+
+            <DragHandle onDrag={handleRightDrag} />
+
+            <Box sx={{ width: graphWidth, flexShrink: 0, position: 'relative', bgcolor: c.bg }}>
+              <GraphCanvas />
+
+              {selectedNodeId && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 12,
+                    right: 12,
+                    width: 340,
+                    maxHeight: 'calc(100% - 24px)',
+                    overflowY: 'auto',
+                    borderRadius: '10px',
+                    border: `1px solid ${c.border}`,
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    zIndex: 10,
+                    bgcolor: c.bgCard,
+                  }}
+                >
+                  <NodeEditor />
+                </Box>
+              )}
+            </Box>
+          </>
+        )}
       </Box>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
@@ -238,6 +291,7 @@ function MainApp() {
 }
 
 function App() {
+  const c = useColors()
   const user = useAuthStore((s) => s.user)
   const loading = useAuthStore((s) => s.loading)
   const restoreSession = useAuthStore((s) => s.restoreSession)
@@ -248,8 +302,8 @@ function App() {
 
   if (loading) {
     return (
-      <Box sx={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#13141f' }}>
-        <CircularProgress sx={{ color: '#E8613A' }} />
+      <Box sx={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: c.bg }}>
+        <CircularProgress sx={{ color: c.primary }} />
       </Box>
     )
   }

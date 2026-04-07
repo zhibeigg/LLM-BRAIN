@@ -1,13 +1,13 @@
 import { Router } from 'express'
 import { orchestrator } from '../llm/orchestrator.js'
-import { broadcast } from '../ws/server.js'
+import type { ExecutionMode } from '../types/index.js'
 
 export const taskRouter = Router()
 
-// POST /api/task/execute - 执行任务
+// POST /api/task/execute - 执行任务（支持排队 + 执行模式）
 taskRouter.post('/execute', async (req, res) => {
   try {
-    const { prompt, brainId } = req.body
+    const { prompt, brainId, mode, enabledTools } = req.body
     if (!prompt || typeof prompt !== 'string') {
       res.status(400).json({ error: '缺少 prompt 参数' })
       return
@@ -16,16 +16,21 @@ taskRouter.post('/execute', async (req, res) => {
       res.status(400).json({ error: '缺少 brainId 参数' })
       return
     }
-    if (orchestrator.running) {
-      res.status(409).json({ error: '已有任务在执行中' })
+
+    const execMode = (['auto', 'plan', 'supervised', 'readonly'].includes(mode) ? mode : undefined) as ExecutionMode | undefined
+
+    if (execMode === 'readonly') {
+      res.status(403).json({ error: '当前为只读模式，不允许执行任务' })
       return
     }
-    // 异步执行，立即返回
-    res.json({ status: 'started', message: '任务已开始执行，请通过 WebSocket 接收实时进度' })
-    // 不 await，让它在后台运行
-    orchestrator.executeTask(prompt, brainId).catch(err => {
-      console.error('Task execution error:', err)
-      broadcast('error', { message: err instanceof Error ? err.message : String(err) })
+
+    const tools = Array.isArray(enabledTools) ? enabledTools as string[] : undefined
+    const item = orchestrator.enqueue('task', prompt, brainId, execMode, tools)
+    const queued = orchestrator.running
+    res.json({
+      status: queued ? 'queued' : 'started',
+      queueItemId: item.id,
+      message: queued ? '任务已加入队列' : '任务已开始执行',
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
@@ -36,4 +41,19 @@ taskRouter.post('/execute', async (req, res) => {
 // GET /api/task/status - 获取任务状态
 taskRouter.get('/status', (_req, res) => {
   res.json({ running: orchestrator.running })
+})
+
+// GET /api/task/queue - 获取当前队列
+taskRouter.get('/queue', (_req, res) => {
+  res.json({ queue: orchestrator.queue })
+})
+
+// DELETE /api/task/queue/:id - 取消排队
+taskRouter.delete('/queue/:id', (req, res) => {
+  const removed = orchestrator.removeFromQueue(req.params.id)
+  if (removed) {
+    res.json({ status: 'removed' })
+  } else {
+    res.status(404).json({ error: '队列中未找到该任务' })
+  }
 })

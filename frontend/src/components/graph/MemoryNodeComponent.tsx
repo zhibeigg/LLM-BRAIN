@@ -1,22 +1,27 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useState, useMemo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Box, Typography, Chip, IconButton } from '@mui/material'
 import { Close as CloseIcon } from '@mui/icons-material'
 import type { MemoryNode } from '../../types'
 import { useGraphStore } from '../../stores/graphStore'
-import { darkColors as c } from '../../theme'
+import { useColors } from '../../ThemeContext'
+import type { AppColors } from '../../theme'
 
 type MemoryNodeData = MemoryNode & Record<string, unknown>
 
-const nodeColors: Record<string, { accent: string; bg: string }> = {
-  personality: { accent: c.primary, bg: `${c.primary}12` },
-  memory: { accent: c.secondary, bg: `${c.secondary}12` },
+function getNodeColors(c: AppColors) {
+  return {
+    personality: { accent: c.primary, bg: `${c.primary}12` },
+    memory: { accent: c.secondary, bg: `${c.secondary}12` },
+  } as Record<string, { accent: string; bg: string }>
 }
 
-const NEW_NODE_COLOR = c.success
 const HIGHLIGHT_DURATION = 8000
 
 function MemoryNodeComponentInner(props: NodeProps) {
+  const c = useColors()
+  const nodeColors = getNodeColors(c)
+  const NEW_NODE_COLOR = c.success
   const data = props.data as MemoryNodeData
   const selected = props.selected
   const active = (data as Record<string, unknown>).active === true
@@ -57,6 +62,13 @@ function MemoryNodeComponentInner(props: NodeProps) {
     : active
       ? colors.bg
       : c.bgCard
+
+  const handleStyle: React.CSSProperties = useMemo(() => ({
+    width: 8,
+    height: 8,
+    background: c.textMuted,
+    border: `1.5px solid ${c.bgPanel}`,
+  }), [c.textMuted, c.bgPanel])
 
   return (
     <Box
@@ -189,13 +201,6 @@ function MemoryNodeComponentInner(props: NodeProps) {
       <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
     </Box>
   )
-}
-
-const handleStyle: React.CSSProperties = {
-  width: 8,
-  height: 8,
-  background: '#6C6F8A',
-  border: '1.5px solid #191a2a',
 }
 
 export const MemoryNodeComponent = memo(MemoryNodeComponentInner)

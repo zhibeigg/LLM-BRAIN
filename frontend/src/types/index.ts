@@ -171,6 +171,9 @@ export type WSMessageType =
   | 'learning_progress'
   | 'node_extracted'
   | 'extraction_done'
+  | 'queue_update'
+  | 'plan_ready'
+  | 'step_confirm'
   | 'error'
 
 export interface WSMessage {
@@ -236,4 +239,42 @@ export interface LearningProgressPayload {
   edgesCreated?: number
   totalNodes?: number
   totalEdges?: number
+}
+
+// ===== 任务队列 =====
+
+export interface QueueItem {
+  id: string
+  type: 'task' | 'learn'
+  prompt: string
+  brainId: string
+  createdAt: number
+}
+
+// ===== 执行模式 =====
+
+export type ExecutionMode = 'auto' | 'plan' | 'supervised' | 'readonly'
+
+export interface PlanReadyPayload {
+  planId: string
+  taskPrompt: string
+  path: Array<{ nodeId: string; nodeTitle: string; nodeType: string }>
+  memoryContext: string
+  totalSteps: number
+}
+
+export interface StepConfirmPayload {
+  stepId: string
+  type: 'leader_decision' | 'agent_execute'
+  description: string
+}
+
+// ===== 工具系统 =====
+
+export interface ToolDefinition {
+  id: string
+  name: string
+  description: string
+  defaultEnabled: boolean
+  category: 'search' | 'code' | 'memory' | 'utility'
 }

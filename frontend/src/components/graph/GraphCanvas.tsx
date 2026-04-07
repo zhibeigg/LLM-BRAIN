@@ -2,6 +2,7 @@ import { useCallback, useMemo, useEffect, useState } from 'react'
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   ControlButton,
   MiniMap,
@@ -19,11 +20,12 @@ import '@xyflow/react/dist/style.css'
 import { useGraphStore } from '../../stores/graphStore'
 import { useBrainStore } from '../../stores/brainStore'
 import { useTaskStore } from '../../stores/taskStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { MemoryNodeComponent } from './MemoryNodeComponent'
 import { AnimatedEdge } from './AnimatedEdge'
 import { ContextMenu } from './ContextMenu'
 
-import { darkColors as c } from '../../theme'
+import { useColors, useThemeMode } from '../../ThemeContext'
 
 const nodeTypes = {
   memoryNode: MemoryNodeComponent,
@@ -47,6 +49,7 @@ const INITIAL_MENU_STATE: ContextMenuState = {
 }
 
 function ChineseControls() {
+  const c = useColors()
   const { zoomIn, zoomOut, fitView } = useReactFlow()
 
   return (
@@ -71,6 +74,8 @@ function ChineseControls() {
 }
 
 export function GraphCanvas() {
+  const c = useColors()
+  const { mode } = useThemeMode()
   const {
     nodes: storeNodes,
     edges: storeEdges,
@@ -87,6 +92,9 @@ export function GraphCanvas() {
   const currentBrainId = useBrainStore((s) => s.currentBrainId)
   const activeEdgeIds = useTaskStore((s) => s.activeEdgeIds)
   const activeNodeId = useTaskStore((s) => s.activeNodeId)
+  const showMinimap = useSettingsStore((s) => s.showMinimap)
+  const graphSnapToGrid = useSettingsStore((s) => s.graphSnapToGrid)
+  const graphAnimateEdges = useSettingsStore((s) => s.graphAnimateEdges)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(INITIAL_MENU_STATE)
 
   useEffect(() => {
@@ -119,11 +127,12 @@ export function GraphCanvas() {
           baseDifficulty: edge.baseDifficulty,
           difficultyTypes: edge.difficultyTypes,
           active: activeEdgeIds.has(edge.id),
+          animate: graphAnimateEdges,
           thinkingContent: undefined,
         },
         markerEnd: { type: MarkerType.ArrowClosed, color: activeEdgeIds.has(edge.id) ? c.primary : c.textMuted },
       })),
-    [storeEdges, activeEdgeIds],
+    [storeEdges, activeEdgeIds, graphAnimateEdges],
   )
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(initialRfNodes)
@@ -271,23 +280,34 @@ export function GraphCanvas() {
         defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
         minZoom={0.2}
         maxZoom={2}
+        snapToGrid={graphSnapToGrid}
+        snapGrid={[20, 20]}
         style={{ background: c.bg }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#2d2e4a" gap={24} size={1} />
-        <ChineseControls />
-        <MiniMap
-          position="bottom-right"
-          style={{ background: c.bgPanel, width: 140, height: 100 }}
-          nodeColor={(node) =>
-            node.data?.type === 'personality' ? c.primary : c.secondary
-          }
-          maskColor="rgba(0,0,0,0.3)"
-          nodeStrokeWidth={0}
-          nodeBorderRadius={1}
-          pannable
-          zoomable={false}
+        <Background
+          color={graphSnapToGrid
+            ? (mode === 'dark' ? '#3a3d41' : '#C6C6CC')
+            : (mode === 'dark' ? '#26282b' : '#D1D1D6')}
+          gap={graphSnapToGrid ? 20 : 24}
+          size={graphSnapToGrid ? 1 : 1}
+          variant={graphSnapToGrid ? BackgroundVariant.Lines : BackgroundVariant.Dots}
         />
+        <ChineseControls />
+        {showMinimap && (
+          <MiniMap
+            position="bottom-right"
+            style={{ background: c.bgPanel, width: 140, height: 100 }}
+            nodeColor={(node) =>
+              node.data?.type === 'personality' ? c.primary : c.secondary
+            }
+            maskColor={mode === 'dark' ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.08)'}
+            nodeStrokeWidth={0}
+            nodeBorderRadius={1}
+            pannable
+            zoomable={false}
+          />
+        )}
       </ReactFlow>
 
       <ContextMenu

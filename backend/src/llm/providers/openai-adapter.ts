@@ -43,6 +43,10 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     if (options.temperature != null) body.temperature = options.temperature
     if (options.maxTokens != null) body.max_tokens = options.maxTokens
     if (options.responseFormat === 'json') body.response_format = { type: 'json_object' }
+    if (options.tools && options.tools.length > 0) {
+      body.tools = options.tools
+      body.tool_choice = options.tool_choice ?? 'auto'
+    }
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -70,6 +74,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     return {
       content: choice.message?.content ?? '',
+      tool_calls: choice.message?.tool_calls ?? undefined,
       usage: data.usage ? {
         promptTokens: data.usage.prompt_tokens,
         completionTokens: data.usage.completion_tokens,

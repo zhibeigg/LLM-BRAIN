@@ -4,8 +4,8 @@ html, body, #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #13141f;
-  color: #E8EAF6;
+  background: var(--color-bg, #13141f);
+  color: var(--color-text, #E8EAF6);
   font-family: 'Inter', 'Noto Sans SC', sans-serif;
 }
 
@@ -24,43 +24,43 @@ html, body, #root {
   --Paper-overlay: none !important;
 }
 
-/* React Flow 深色主题 */
+/* React Flow 主题 */
 .react-flow__background {
-  background: #13141f !important;
+  background: var(--color-bg, #13141f) !important;
 }
 
 .react-flow__minimap {
-  background: #191a2a !important;
+  background: var(--color-bg-panel, #191a2a) !important;
   border-radius: 8px;
-  border: 1px solid #333458;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  border: 1px solid var(--color-border, #333458);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .react-flow__controls {
   border-radius: 8px;
-  border: 1px solid #333458;
-  background: #191a2a;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  border: 1px solid var(--color-border, #333458);
+  background: var(--color-bg-panel, #191a2a);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .react-flow__controls-button {
-  background: #232438 !important;
-  border-color: #333458 !important;
-  color: #A0A3BD !important;
-  fill: #A0A3BD !important;
+  background: var(--color-bg-card, #232438) !important;
+  border-color: var(--color-border, #333458) !important;
+  color: var(--color-text-secondary, #A0A3BD) !important;
+  fill: var(--color-text-secondary, #A0A3BD) !important;
 }
 
 .react-flow__controls-button:hover {
-  background: #2a2b45 !important;
-  color: #E8613A !important;
-  fill: #E8613A !important;
+  background: var(--color-bg-input, #2a2b45) !important;
+  color: var(--color-primary, #E8613A) !important;
+  fill: var(--color-primary, #E8613A) !important;
 }
 
 .react-flow__controls-button svg {
   fill: currentColor !important;
 }
 
-/* 滚动条 - 深色 */
+/* 滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -70,12 +70,12 @@ html, body, #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3e3f62;
+  background: var(--color-border-light, #3e3f62);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6C6F8A;
+  background: var(--color-text-muted, #6C6F8A);
 }
 
 /* React Flow 连接线 */
@@ -84,8 +84,8 @@ html, body, #root {
 }
 
 .react-flow__handle {
-  background: #6C6F8A !important;
-  border-color: #191a2a !important;
+  background: var(--color-text-muted, #6C6F8A) !important;
+  border-color: var(--color-bg-panel, #191a2a) !important;
 }
 
 /* ========== ThinkingPanel 动画 ========== */
@@ -134,7 +134,7 @@ html, body, #root {
 @keyframes verdictFlash {
   0% { border-color: var(--verdict-color, #4ADE80); }
   30% { border-color: var(--verdict-color, #4ADE80); }
-  100% { border-color: #2a2c3e; }
+  100% { border-color: var(--color-bg-card, #2a2c3e); }
 }
 
 /* Agent 输出光标闪烁 */
@@ -209,7 +209,7 @@ html, body, #root {
 
 /* Agent 终端风格 */
 .agent-terminal {
-  background: #0a0b14;
+  background: var(--color-bg, #0a0b14);
   border-radius: 6px;
   padding: 10px 12px;
   position: relative;
@@ -234,7 +234,7 @@ html, body, #root {
   display: inline-block;
   width: 8px;
   height: 16px;
-  background: #4ADE80;
+  background: var(--color-success, #4ADE80);
   margin-left: 2px;
   vertical-align: text-bottom;
   animation: cursorBlink 1s step-end infinite;
@@ -258,10 +258,10 @@ html, body, #root {
 
 .thinking-scroll-container::before {
   top: 0;
-  background: linear-gradient(to bottom, #191a2a, transparent);
+  background: linear-gradient(to bottom, var(--color-bg-panel, #191a2a), transparent);
 }
 
 .thinking-scroll-container::after {
   bottom: 0;
-  background: linear-gradient(to top, #191a2a, transparent);
+  background: linear-gradient(to top, var(--color-bg-panel, #191a2a), transparent);
 }
