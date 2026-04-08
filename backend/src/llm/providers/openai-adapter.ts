@@ -123,13 +123,39 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       .map(m => m.content)
       .join('\n')
 
-    const input = options.messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role, content: m.content }))
+    const input: Array<Record<string, unknown>> = []
+
+    for (const m of options.messages) {
+      if (m.role === 'system') continue
+
+      if (m.role === 'tool' && m.tool_call_id) {
+        // 工具结果消息
+        input.push({
+          type: 'function_call_output',
+          call_id: m.tool_call_id,
+          output: m.content,
+        })
+      } else if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+        // assistant 消息中包含 tool_calls → 转为 function_call items
+        if (m.content) {
+          input.push({ role: 'assistant', content: m.content })
+        }
+        for (const tc of m.tool_calls) {
+          input.push({
+            type: 'function_call',
+            call_id: tc.id,
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          })
+        }
+      } else {
+        input.push({ role: m.role, content: m.content })
+      }
+    }
 
     // Codex 要求 input 中包含 "json" 才能使用 json_object 格式
     if (options.responseFormat === 'json') {
-      const hasJsonInInput = input.some((m: { content: string }) => m.content.toLowerCase().includes('json'))
+      const hasJsonInInput = input.some((m) => typeof m.content === 'string' && m.content.toLowerCase().includes('json'))
       if (!hasJsonInInput) {
         input.push({ role: 'user', content: '请以 JSON 格式回复。' })
       }
@@ -144,17 +170,76 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     if (options.maxTokens != null) body.max_output_tokens = options.maxTokens
     if (options.responseFormat === 'json') body.text = { format: { type: 'json_object' } }
 
+    // Responses API 的 tools 格式
+    if (options.tools && options.tools.length > 0) {
+      body.tools = options.tools.map(t => ({
+        type: 'function',
+        name: t.function.name,
+        description: t.function.description,
+        parameters: t.function.parameters,
+      }))
+    }
+
     return body
   }
 
   private async chatCodex(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
-    // 使用流式拼接，避免长请求超时断连
-    let content = ''
-    for await (const chunk of this.streamCodex(options)) {
-      content += chunk.content
+    const body = this.buildResponsesInput(options)
+
+    const res = await fetch(`${this.baseUrl}/responses`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const err = await res.text().catch(() => res.statusText)
+      throw new Error(`Codex API 错误 (${res.status}): ${err.substring(0, 300)}`)
     }
-    if (!content) throw new Error(`Codex 返回空内容 (model: ${this.model})`)
-    return { content }
+
+    const data = await res.json() as Record<string, unknown>
+    const output = data.output as Array<Record<string, unknown>> | undefined
+
+    // 提取文本内容
+    let content = ''
+    const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = []
+
+    if (output) {
+      for (const item of output) {
+        if (item.type === 'message') {
+          const contentArr = item.content as Array<Record<string, unknown>> | undefined
+          if (contentArr) {
+            for (const part of contentArr) {
+              if (part.type === 'output_text' && typeof part.text === 'string') {
+                content += part.text
+              }
+            }
+          }
+        } else if (item.type === 'function_call') {
+          toolCalls.push({
+            id: (item.call_id ?? item.id) as string,
+            type: 'function',
+            function: {
+              name: item.name as string,
+              arguments: item.arguments as string,
+            },
+          })
+        }
+      }
+    }
+
+    return {
+      content,
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage: data.usage ? (() => {
+        const u = data.usage as Record<string, number>
+        return {
+          promptTokens: u.input_tokens ?? u.prompt_tokens ?? 0,
+          completionTokens: u.output_tokens ?? u.completion_tokens ?? 0,
+          totalTokens: u.total_tokens ?? (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
+        }
+      })() : undefined,
+    }
   }
 
   private extractResponsesContent(data: Record<string, unknown>): string {
