@@ -1,4 +1,5 @@
 import { ScholarRole } from '../../llm/roles/scholar.js'
+import { getRoleConfig } from '../../db/llm-config.js'
 import { sugiyamaLayout } from '../graph/layout.js'
 import { getNodesByBrainId, getNodeById, createNode } from '../../db/nodes.js'
 import { createEdge, getEdgesBySourceId } from '../../db/edges.js'
@@ -77,7 +78,30 @@ ${existingSummary.length > 0 ? JSON.stringify(existingSummary) : '无'}
 - confidence: 0.0-1.0，公理给高值，推论给低值
 - 只返回JSON，不要任何其他内容`
 
+  const scholarStartTime = Date.now()
   const result = await scholar.chat(scholarInput)
+  const scholarLatency = Date.now() - scholarStartTime
+  const scholarModel = getRoleConfig('scholar')?.model
+
+  // 推送 Scholar LLM 的溯源信息
+  const scholarTrace = {
+    model: scholarModel,
+    prompt: scholarInput,
+    rawResponse: result.content || '(空响应)',
+    latencyMs: scholarLatency,
+    ...(result.usage ? { tokenUsage: { prompt: result.usage.promptTokens, completion: result.usage.completionTokens } } : {}),
+  }
+
+  broadcastProgress({
+    phase: 'generating',
+    message: result.content ? '知识结构生成完成，正在解析...' : 'Scholar LLM 返回空内容',
+    trace: scholarTrace,
+  })
+
+  // 空内容检测
+  if (!result.content || result.content.trim() === '') {
+    throw new Error(`Scholar LLM 返回空内容 (model: ${scholarModel || '未知'})，请检查 LLM 提供商配置和 API Key`)
+  }
 
   let parsed: ScholarResult
   try {

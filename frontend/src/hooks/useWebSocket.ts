@@ -131,7 +131,8 @@ export function useWebSocket() {
       // 如果 autoReview 开启，自动批准
       const state = useTaskStore.getState()
       if (state.autoReview) {
-        wsClient.send('plan_response', { approved: true })
+        const requestId = payload.requestId || `plan-${Date.now()}`
+        wsClient.send('plan_response', { approved: true, requestId })
       } else {
         setPendingPlan(payload)
       }
@@ -141,7 +142,8 @@ export function useWebSocket() {
       const payload = msg.payload as StepConfirmPayload
       const state = useTaskStore.getState()
       if (state.autoReview) {
-        wsClient.send('step_response', { approved: true })
+        const requestId = payload.requestId || payload.stepId || `step-${Date.now()}`
+        wsClient.send('step_response', { approved: true, requestId })
       } else {
         setPendingStep(payload)
       }

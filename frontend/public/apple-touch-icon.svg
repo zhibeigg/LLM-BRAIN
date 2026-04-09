@@ -1,0 +1,5 @@
+apple-mobile-web-app-capable=yes
+apple-mobile-web-app-status-bar-style=default
+apple-mobile-web-app-title=LLMBrain
+meta[name=apple-mobile-web-app-title] content=LLMBrain
+link rel=apple-touch-icon href=pwa-192x192.svg

@@ -25,6 +25,7 @@ export function getDb(): Database.Database {
     migrateAddBrainId(db)
     migrateAddUserId(db)
     migrateAddProjectPath(db)
+    migrateAddIndexes(db)
   }
   return db
 }
@@ -75,6 +76,41 @@ function initTables(db: Database.Database): void {
       last_used_at INTEGER,
       created_at INTEGER NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_edges_source_id ON edges(source_id);
+    CREATE INDEX IF NOT EXISTS idx_edges_target_id ON edges(target_id);
+    CREATE INDEX IF NOT EXISTS idx_edges_usage_count ON edges(usage_count);
+    CREATE INDEX IF NOT EXISTS idx_edges_source_target ON edges(source_id, target_id);
+
+    CREATE INDEX IF NOT EXISTS idx_nodes_brain_id ON nodes(brain_id);
+    CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+    CREATE INDEX IF NOT EXISTS idx_nodes_updated_at ON nodes(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_nodes_brain_type ON nodes(brain_id, type);
+    CREATE INDEX IF NOT EXISTS idx_nodes_brain_updated ON nodes(brain_id, updated_at);
+
+    -- 全文搜索表
+    CREATE TABLE IF NOT EXISTS nodes_fts (
+      node_id TEXT NOT NULL PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT DEFAULT '',
+      tags TEXT DEFAULT '[]'
+    );
+
+    -- 全文搜索触发器：插入
+    CREATE TRIGGER IF NOT EXISTS nodes_fts_insert AFTER INSERT ON nodes BEGIN
+      INSERT INTO nodes_fts(node_id, title, content, tags) VALUES (new.id, new.title, new.content, new.tags);
+    END;
+
+    -- 全文搜索触发器：更新
+    CREATE TRIGGER IF NOT EXISTS nodes_fts_update AFTER UPDATE ON nodes BEGIN
+      DELETE FROM nodes_fts WHERE node_id = old.id;
+      INSERT INTO nodes_fts(node_id, title, content, tags) VALUES (new.id, new.title, new.content, new.tags);
+    END;
+
+    -- 全文搜索触发器：删除
+    CREATE TRIGGER IF NOT EXISTS nodes_fts_delete AFTER DELETE ON nodes BEGIN
+      DELETE FROM nodes_fts WHERE node_id = old.id;
+    END;
 
     CREATE TABLE IF NOT EXISTS personality_dimensions (
       id TEXT PRIMARY KEY,
@@ -193,8 +229,137 @@ function migrateAddProjectPath(db: Database.Database): void {
   console.log('数据库迁移完成：brains 表已添加 project_path 列')
 }
 
+/** 迁移：为 nodes 和 edges 表添加缺失的索引 */
+function migrateAddIndexes(db: Database.Database): void {
+  // 检查 nodes_fts 表是否存在
+  const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='nodes_fts'`).all()
+  if (tables.length === 0) {
+    // 创建全文搜索表
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS nodes_fts (
+        node_id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT DEFAULT '',
+        tags TEXT DEFAULT '[]'
+      );
+    `)
+
+    // 创建触发器
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS nodes_fts_insert AFTER INSERT ON nodes BEGIN
+        INSERT INTO nodes_fts(node_id, title, content, tags) VALUES (new.id, new.title, new.content, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS nodes_fts_update AFTER UPDATE ON nodes BEGIN
+        INSERT INTO nodes_fts(node_id, title, content, tags) VALUES (new.id, new.title, new.content, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS nodes_fts_delete AFTER DELETE ON nodes BEGIN
+        DELETE FROM nodes_fts WHERE node_id = old.id;
+      END;
+    `)
+
+    // 初始化FTS数据
+    db.exec(`
+      INSERT INTO nodes_fts(node_id, title, content, tags)
+      SELECT id, title, content, tags FROM nodes
+    `)
+    console.log('数据库迁移完成：已创建 nodes_fts 全文搜索表和触发器')
+  }
+
+  // 检查并添加缺失的索引
+  const existingIndexes = db.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('nodes', 'edges')`).all() as Array<{ name: string }>
+  const indexNames = existingIndexes.map(i => i.name)
+
+  if (!indexNames.includes('idx_nodes_brain_id')) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_brain_id ON nodes(brain_id)`)
+  }
+  if (!indexNames.includes('idx_nodes_type')) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type)`)
+  }
+  if (!indexNames.includes('idx_nodes_updated_at')) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_updated_at ON nodes(updated_at)`)
+  }
+  if (!indexNames.includes('idx_nodes_brain_type')) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_brain_type ON nodes(brain_id, type)`)
+  }
+  if (!indexNames.includes('idx_nodes_brain_updated')) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_nodes_brain_updated ON nodes(brain_id, updated_at)`)
+  }
+  if (!indexNames.includes('idx_edges_source_target')) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_edges_source_target ON edges(source_id, target_id)`)
+  }
+}
+
 export function closeDb(): void {
   if (db) {
     db.close()
   }
+}
+
+/**
+ * 索引管理函数
+ */
+export function createIndexes(db: Database.Database): void {
+  db.transaction(() => {
+    // nodes表索引
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_nodes_brain_id ON nodes(brain_id);
+      CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+      CREATE INDEX IF NOT EXISTS idx_nodes_updated_at ON nodes(updated_at);
+      CREATE INDEX IF NOT EXISTS idx_nodes_brain_type ON nodes(brain_id, type);
+      CREATE INDEX IF NOT EXISTS idx_nodes_brain_updated ON nodes(brain_id, updated_at);
+    `)
+
+    // edges表索引
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_edges_source_target ON edges(source_id, target_id);
+      CREATE INDEX IF NOT EXISTS idx_edges_source_id ON edges(source_id);
+      CREATE INDEX IF NOT EXISTS idx_edges_target_id ON edges(target_id);
+      CREATE INDEX IF NOT EXISTS idx_edges_usage_count ON edges(usage_count);
+    `)
+
+    // 初始化FTS索引（从现有数据）
+    rebuildFtsIndex(db)
+
+    console.log('数据库索引创建完成')
+  })()
+}
+
+/**
+ * 重建全文搜索索引
+ */
+export function rebuildFtsIndex(db: Database.Database): void {
+  db.exec(`DELETE FROM nodes_fts`)
+  db.exec(`
+    INSERT INTO nodes_fts(node_id, title, content, tags)
+    SELECT id, title, content, tags FROM nodes
+  `)
+  console.log('全文搜索索引重建完成')
+}
+
+/**
+ * 获取索引状态信息
+ */
+export function getIndexStats(db: Database.Database): Record<string, number> {
+  const indexes = db.prepare(`
+    SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('nodes', 'edges')
+  `).all() as Array<{ name: string }>
+
+  const ftsCount = (db.prepare(`SELECT COUNT(*) as count FROM nodes_fts`).get() as { count: number }).count
+  const nodesCount = (db.prepare(`SELECT COUNT(*) as count FROM nodes`).get() as { count: number }).count
+  const edgesCount = (db.prepare(`SELECT COUNT(*) as count FROM edges`).get() as { count: number }).count
+
+  return {
+    indexCount: indexes.length,
+    ftsIndexCount: ftsCount,
+    nodesCount,
+    edgesCount
+  }
+}
+
+/**
+ * 优化数据库（VACUUM + ANALYZE）
+ */
+export function optimizeDatabase(db: Database.Database): void {
+  db.exec(`ANALYZE`)
+  console.log('数据库分析完成')
 }

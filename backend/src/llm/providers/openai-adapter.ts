@@ -74,6 +74,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     return {
       content: choice.message?.content ?? '',
+      model: this.model,
       tool_calls: choice.message?.tool_calls ?? undefined,
       usage: data.usage ? {
         promptTokens: data.usage.prompt_tokens,
@@ -200,6 +201,11 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     const data = await res.json() as Record<string, unknown>
     const output = data.output as Array<Record<string, unknown>> | undefined
 
+    // 调试日志：查看 Responses API 返回的 output 结构
+    if (options.tools && options.tools.length > 0) {
+      console.log('[Codex tools] output types:', output?.map(o => o.type))
+    }
+
     // 提取文本内容
     let content = ''
     const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = []
@@ -230,6 +236,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     return {
       content,
+      model: this.model,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: data.usage ? (() => {
         const u = data.usage as Record<string, number>

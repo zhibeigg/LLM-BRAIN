@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { immer } from 'zustand/middleware/immer'
+import { useShallow } from 'zustand/shallow'
 import type {
   LeaderStepPayload,
   LeaderDecisionPayload,
@@ -16,6 +18,10 @@ import type { ChatSessionDTO } from '../services/api'
 import { useBrainStore } from './brainStore'
 import { useSettingsStore } from './settingsStore'
 import { wsClient } from '../services/websocket'
+
+// ============================================================================
+// 共享类型定义
+// ============================================================================
 
 export interface ThinkingStep {
   id: string
@@ -52,7 +58,11 @@ function dtoToSession(dto: ChatSessionDTO): ChatSession {
   }
 }
 
-interface TaskState {
+// ============================================================================
+// Store 1: 任务执行状态 (TaskExecutionStore)
+// ============================================================================
+
+interface TaskExecutionState {
   isRunning: boolean
   isLearning: boolean
   currentTaskPrompt: string | null
@@ -61,23 +71,415 @@ interface TaskState {
   activeEdgeIds: Set<string>
   activeNodeId: string | null
   error: string | null
+  pendingPlan: PlanReadyPayload | null
+  pendingStep: StepConfirmPayload | null
+}
 
+interface TaskExecutionActions {
+  setIsRunning: (running: boolean) => void
+  setIsLearning: (learning: boolean) => void
+  setError: (error: string | null) => void
+  reset: () => void
+  addThinkingStep: (step: ThinkingStep) => void
+  mergeAgentStream: (payload: AgentStreamPayload, timestamp: number) => void
+  addToolCall: (payload: ToolCallPayload, timestamp: number) => void
+  updateToolCall: (callId: string, payload: ToolCallPayload, timestamp: number) => void
+  appendAgentOutput: (chunk: string) => void
+  setActiveEdge: (edgeId: string | null) => void
+  setActiveNode: (nodeId: string | null) => void
+  setPendingPlan: (plan: PlanReadyPayload | null) => void
+  setPendingStep: (step: StepConfirmPayload | null) => void
+  approvePlan: () => void
+  rejectPlan: () => void
+  approveStep: () => void
+  rejectStep: () => void
+}
+
+type TaskExecutionStore = TaskExecutionState & TaskExecutionActions
+
+const initialExecutionState: TaskExecutionState = {
+  isRunning: false,
+  isLearning: false,
+  currentTaskPrompt: null,
+  thinkingSteps: [],
+  agentOutput: '',
+  activeEdgeIds: new Set<string>(),
+  activeNodeId: null,
+  error: null,
+  pendingPlan: null,
+  pendingStep: null,
+}
+
+let agentStepIdCounter = 0
+
+export const useTaskExecutionStore = create<TaskExecutionStore>()(
+  immer((set, get) => ({
+    ...initialExecutionState,
+
+    setIsRunning: (running) =>
+      set((state) => {
+        state.isRunning = running
+      }),
+
+    setIsLearning: (learning) =>
+      set((state) => {
+        state.isLearning = learning
+      }),
+
+    setError: (error) =>
+      set((state) => {
+        state.error = error
+        if (error) {
+          state.isRunning = false
+          state.isLearning = false
+        }
+      }),
+
+    reset: () =>
+      set((state) => {
+        Object.assign(state, {
+          ...initialExecutionState,
+          activeEdgeIds: new Set<string>(),
+        })
+      }),
+
+    addThinkingStep: (step) =>
+      set((state) => {
+        state.thinkingSteps.push(step)
+      }),
+
+    mergeAgentStream: (payload, timestamp) =>
+      set((state) => {
+        const steps = state.thinkingSteps
+        const lastStep = steps[steps.length - 1]
+
+        if (lastStep && lastStep.type === 'agent_stream') {
+          const prevData = lastStep.data as AgentStreamPayload
+          lastStep.timestamp = timestamp
+          lastStep.data = {
+            chunk: prevData.chunk + payload.chunk,
+            done: payload.done,
+            trace: payload.trace ?? prevData.trace,
+          }
+        } else {
+          steps.push({
+            id: `agent-stream-${Date.now()}-${++agentStepIdCounter}`,
+            type: 'agent_stream',
+            timestamp,
+            data: payload,
+          })
+        }
+      }),
+
+    addToolCall: (payload, timestamp) =>
+      set((state) => {
+        state.thinkingSteps.push({
+          id: `tool-call-${payload.callId}`,
+          type: 'tool_call',
+          timestamp,
+          data: payload,
+        })
+      }),
+
+    updateToolCall: (callId, payload, timestamp) =>
+      set((state) => {
+        const step = state.thinkingSteps.find(
+          (s: ThinkingStep) => s.type === 'tool_call' && (s.data as ToolCallPayload).callId === callId
+        )
+        if (step) {
+          step.timestamp = timestamp
+          step.data = payload
+        }
+      }),
+
+    appendAgentOutput: (chunk) =>
+      set((state) => {
+        state.agentOutput += chunk
+      }),
+
+    setActiveEdge: (edgeId) =>
+      set((state) => {
+        if (edgeId) {
+          state.activeEdgeIds.add(edgeId)
+        } else {
+          state.activeEdgeIds.clear()
+        }
+      }),
+
+    setActiveNode: (nodeId) =>
+      set((state) => {
+        state.activeNodeId = nodeId
+      }),
+
+    setPendingPlan: (plan) =>
+      set((state) => {
+        state.pendingPlan = plan
+      }),
+
+    setPendingStep: (step) =>
+      set((state) => {
+        state.pendingStep = step
+      }),
+
+    approvePlan: () => {
+      const { pendingPlan } = get()
+      const requestId = pendingPlan?.requestId || `plan-${Date.now()}`
+      wsClient.send('plan_response', { approved: true, requestId })
+      set((state) => {
+        state.pendingPlan = null
+      })
+    },
+
+    rejectPlan: () => {
+      const { pendingPlan } = get()
+      const requestId = pendingPlan?.requestId || `plan-${Date.now()}`
+      wsClient.send('plan_response', { approved: false, requestId })
+      set((state) => {
+        state.pendingPlan = null
+      })
+    },
+
+    approveStep: () => {
+      const { pendingStep } = get()
+      const requestId = pendingStep?.requestId || pendingStep?.stepId || `step-${Date.now()}`
+      wsClient.send('step_response', { approved: true, requestId })
+      set((state) => {
+        state.pendingStep = null
+      })
+    },
+
+    rejectStep: () => {
+      const { pendingStep } = get()
+      const requestId = pendingStep?.requestId || pendingStep?.stepId || `step-${Date.now()}`
+      wsClient.send('step_response', { approved: false, requestId })
+      set((state) => {
+        state.pendingStep = null
+      })
+    },
+  }))
+)
+
+// ============================================================================
+// Store 2: 会话管理状态 (SessionStore)
+// ============================================================================
+
+interface SessionState {
   sessions: ChatSession[]
   activeSessionId: string | null
   viewingSessionId: string | null
-  queue: QueueItem[]
-  executionMode: ExecutionMode
-  autoReview: boolean
-  pendingPlan: PlanReadyPayload | null
-  pendingStep: StepConfirmPayload | null
-
-  // 分页状态
   sessionsHasMore: boolean
   sessionsLoading: boolean
   sessionsCursor: number | null
+}
 
-  startTask: (prompt: string) => Promise<void>
-  learnTopic: (topic: string) => Promise<void>
+interface SessionActions {
+  viewSession: (id: string | null) => void
+  deleteSession: (id: string) => Promise<void>
+  clearSessions: () => void
+  loadSessions: () => Promise<void>
+  loadMoreSessions: () => Promise<void>
+  addSession: (session: ChatSession) => void
+  updateSession: (id: string, updates: Partial<ChatSession>) => void
+}
+
+type SessionStore = SessionState & SessionActions
+
+const initialSessionState: SessionState = {
+  sessions: [],
+  activeSessionId: null,
+  viewingSessionId: null,
+  sessionsHasMore: true,
+  sessionsLoading: false,
+  sessionsCursor: null,
+}
+
+export const useSessionStore = create<SessionStore>()(
+  immer((set, get) => ({
+    ...initialSessionState,
+
+    viewSession: (id) =>
+      set((state) => {
+        state.viewingSessionId = id
+      }),
+
+    deleteSession: async (id) => {
+      try {
+        await chatSessionsApi.delete(id)
+      } catch (e) {
+        console.error('删除会话失败:', e)
+      }
+      set((state) => {
+        state.sessions = state.sessions.filter((s: ChatSession) => s.id !== id)
+        if (state.viewingSessionId === id) {
+          state.viewingSessionId = null
+        }
+      })
+    },
+
+    clearSessions: () =>
+      set((state) => {
+        state.sessions = []
+        state.viewingSessionId = null
+      }),
+
+    loadSessions: async () => {
+      const brainId = useBrainStore.getState().currentBrainId
+      set((state) => {
+        state.sessionsLoading = true
+      })
+      try {
+        const result = await chatSessionsApi.getPage(brainId ?? undefined)
+        set((state) => {
+          state.sessions = result.items.map(dtoToSession)
+          state.sessionsHasMore = result.hasMore
+          state.sessionsCursor = result.nextCursor ?? null
+          state.sessionsLoading = false
+        })
+      } catch (e) {
+        console.error('加载会话历史失败:', e)
+        set((state) => {
+          state.sessionsLoading = false
+        })
+      }
+    },
+
+    loadMoreSessions: async () => {
+      const { sessionsHasMore, sessionsLoading, sessionsCursor } = get()
+      if (!sessionsHasMore || sessionsLoading) return
+      const brainId = useBrainStore.getState().currentBrainId
+      set((state) => {
+        state.sessionsLoading = true
+      })
+      try {
+        const result = await chatSessionsApi.getPage(brainId ?? undefined, sessionsCursor ?? undefined)
+        set((state) => {
+          state.sessions.push(...result.items.map(dtoToSession))
+          state.sessionsHasMore = result.hasMore
+          state.sessionsCursor = result.nextCursor ?? null
+          state.sessionsLoading = false
+        })
+      } catch (e) {
+        console.error('加载更多会话失败:', e)
+        set((state) => {
+          state.sessionsLoading = false
+        })
+      }
+    },
+
+    addSession: (session) =>
+      set((state) => {
+        const existingIndex = state.sessions.findIndex((s: ChatSession) => s.id === session.id)
+        if (existingIndex >= 0) {
+          state.sessions[existingIndex] = session
+        } else {
+          state.sessions = state.sessions.filter((s: ChatSession) => s.status !== 'running')
+          state.sessions.push(session)
+        }
+        state.activeSessionId = session.id
+        state.viewingSessionId = null
+      }),
+
+    updateSession: (id, updates) =>
+      set((state) => {
+        const session = state.sessions.find((s: ChatSession) => s.id === id)
+        if (session) {
+          Object.assign(session, updates)
+        }
+      }),
+  }))
+)
+
+// ============================================================================
+// Store 3: 队列管理状态 (QueueStore)
+// ============================================================================
+
+interface QueueState {
+  queue: QueueItem[]
+  executionMode: ExecutionMode
+  autoReview: boolean
+}
+
+interface QueueActions {
+  setQueue: (queue: QueueItem[]) => void
+  removeFromQueue: (id: string) => Promise<void>
+  setExecutionMode: (mode: ExecutionMode) => void
+  setAutoReview: (auto: boolean) => void
+}
+
+type QueueStore = QueueState & QueueActions
+
+const initialQueueState: QueueState = {
+  queue: [],
+  executionMode: (localStorage.getItem('llm-brain-exec-mode') as ExecutionMode) || 'auto',
+  autoReview: localStorage.getItem('llm-brain-auto-review') === 'true',
+}
+
+export const useQueueStore = create<QueueStore>()(
+  immer((set) => ({
+    ...initialQueueState,
+
+    setQueue: (queue) =>
+      set((state) => {
+        state.queue = queue
+      }),
+
+    removeFromQueue: async (id) => {
+      try {
+        await taskApi.removeFromQueue(id)
+      } catch (e) {
+        console.error('取消排队失败:', e)
+      }
+      set((state) => {
+        state.queue = state.queue.filter((q: QueueItem) => q.id !== id)
+      })
+    },
+
+    setExecutionMode: (mode) => {
+      localStorage.setItem('llm-brain-exec-mode', mode)
+      set((state) => {
+        state.executionMode = mode
+      })
+    },
+
+    setAutoReview: (auto) => {
+      localStorage.setItem('llm-brain-auto-review', String(auto))
+      set((state) => {
+        state.autoReview = auto
+      })
+    },
+  }))
+)
+
+// ============================================================================
+// 统一兼容层 - useTaskStore
+// ============================================================================
+
+interface LegacyTaskStoreState {
+  // TaskExecutionStore
+  isRunning: boolean
+  isLearning: boolean
+  currentTaskPrompt: string | null
+  thinkingSteps: ThinkingStep[]
+  agentOutput: string
+  activeEdgeIds: Set<string>
+  activeNodeId: string | null
+  error: string | null
+  pendingPlan: PlanReadyPayload | null
+  pendingStep: StepConfirmPayload | null
+  // SessionStore
+  sessions: ChatSession[]
+  activeSessionId: string | null
+  viewingSessionId: string | null
+  sessionsHasMore: boolean
+  sessionsLoading: boolean
+  sessionsCursor: number | null
+  // QueueStore
+  queue: QueueItem[]
+  executionMode: ExecutionMode
+  autoReview: boolean
+}
+
+interface LegacyTaskStoreActions {
   addThinkingStep: (step: ThinkingStep) => void
   mergeAgentStream: (payload: AgentStreamPayload, timestamp: number) => void
   addToolCall: (payload: ToolCallPayload, timestamp: number) => void
@@ -89,9 +491,14 @@ interface TaskState {
   setIsLearning: (learning: boolean) => void
   setError: (error: string | null) => void
   reset: () => void
-
+  setPendingPlan: (plan: PlanReadyPayload | null) => void
+  setPendingStep: (step: StepConfirmPayload | null) => void
+  approvePlan: () => void
+  rejectPlan: () => void
+  approveStep: () => void
+  rejectStep: () => void
   viewSession: (id: string | null) => void
-  deleteSession: (id: string) => void
+  deleteSession: (id: string) => Promise<void>
   clearSessions: () => void
   loadSessions: () => Promise<void>
   loadMoreSessions: () => Promise<void>
@@ -99,393 +506,371 @@ interface TaskState {
   removeFromQueue: (id: string) => Promise<void>
   setExecutionMode: (mode: ExecutionMode) => void
   setAutoReview: (auto: boolean) => void
-  setPendingPlan: (plan: PlanReadyPayload | null) => void
-  setPendingStep: (step: StepConfirmPayload | null) => void
-  approvePlan: () => void
-  rejectPlan: () => void
-  approveStep: () => void
-  rejectStep: () => void
+  startTask: (prompt: string) => Promise<void>
+  learnTopic: (topic: string) => Promise<void>
+  persistCurrentSession: () => Promise<void>
 }
 
-let agentStepIdCounter = 0
+type LegacyTaskStore = LegacyTaskStoreState & LegacyTaskStoreActions
 
-/** 持久化当前会话到后端 */
-async function persistSession(state: TaskState) {
-  if (!state.activeSessionId) return
+async function persistSession(
+  sessionId: string,
+  agentOutput: string,
+  thinkingSteps: ThinkingStep[],
+  status: 'success' | 'error'
+) {
   try {
-    await chatSessionsApi.update(state.activeSessionId, {
-      agentOutput: state.agentOutput,
-      thinkingSteps: state.thinkingSteps,
-      status: state.error ? 'error' : 'success',
+    await chatSessionsApi.update(sessionId, {
+      agentOutput,
+      thinkingSteps,
+      status,
     })
   } catch (e) {
     console.error('持久化会话失败:', e)
   }
 }
 
-const initialState = {
-  isRunning: false,
-  isLearning: false,
-  currentTaskPrompt: null as string | null,
-  thinkingSteps: [] as ThinkingStep[],
-  agentOutput: '',
-  activeEdgeIds: new Set<string>(),
-  activeNodeId: null as string | null,
-  error: null as string | null,
-  sessions: [] as ChatSession[],
-  activeSessionId: null as string | null,
-  viewingSessionId: null as string | null,
-  queue: [] as QueueItem[],
-  executionMode: (localStorage.getItem('llm-brain-exec-mode') as ExecutionMode) || 'auto' as ExecutionMode,
-  autoReview: localStorage.getItem('llm-brain-auto-review') === 'true',
-  pendingPlan: null as PlanReadyPayload | null,
-  pendingStep: null as StepConfirmPayload | null,
-  sessionsHasMore: true,
-  sessionsLoading: false,
-  sessionsCursor: null as number | null,
+// 创建统一的 legacy store
+const legacyStore = create<LegacyTaskStore>()(
+  immer(() => ({
+    // TaskExecutionStore state
+    get isRunning() {
+      return useTaskExecutionStore.getState().isRunning
+    },
+    get isLearning() {
+      return useTaskExecutionStore.getState().isLearning
+    },
+    get currentTaskPrompt() {
+      return useTaskExecutionStore.getState().currentTaskPrompt
+    },
+    get thinkingSteps() {
+      return useTaskExecutionStore.getState().thinkingSteps
+    },
+    get agentOutput() {
+      return useTaskExecutionStore.getState().agentOutput
+    },
+    get activeEdgeIds() {
+      return useTaskExecutionStore.getState().activeEdgeIds
+    },
+    get activeNodeId() {
+      return useTaskExecutionStore.getState().activeNodeId
+    },
+    get error() {
+      return useTaskExecutionStore.getState().error
+    },
+    get pendingPlan() {
+      return useTaskExecutionStore.getState().pendingPlan
+    },
+    get pendingStep() {
+      return useTaskExecutionStore.getState().pendingStep
+    },
+    // SessionStore state
+    get sessions() {
+      return useSessionStore.getState().sessions
+    },
+    get activeSessionId() {
+      return useSessionStore.getState().activeSessionId
+    },
+    get viewingSessionId() {
+      return useSessionStore.getState().viewingSessionId
+    },
+    get sessionsHasMore() {
+      return useSessionStore.getState().sessionsHasMore
+    },
+    get sessionsLoading() {
+      return useSessionStore.getState().sessionsLoading
+    },
+    get sessionsCursor() {
+      return useSessionStore.getState().sessionsCursor
+    },
+    // QueueStore state
+    get queue() {
+      return useQueueStore.getState().queue
+    },
+    get executionMode() {
+      return useQueueStore.getState().executionMode
+    },
+    get autoReview() {
+      return useQueueStore.getState().autoReview
+    },
+    // Actions - delegate to respective stores
+    addThinkingStep: (step) => useTaskExecutionStore.getState().addThinkingStep(step),
+    mergeAgentStream: (payload, timestamp) => useTaskExecutionStore.getState().mergeAgentStream(payload, timestamp),
+    addToolCall: (payload, timestamp) => useTaskExecutionStore.getState().addToolCall(payload, timestamp),
+    updateToolCall: (callId, payload, timestamp) => useTaskExecutionStore.getState().updateToolCall(callId, payload, timestamp),
+    appendAgentOutput: (chunk) => useTaskExecutionStore.getState().appendAgentOutput(chunk),
+    setActiveEdge: (edgeId) => useTaskExecutionStore.getState().setActiveEdge(edgeId),
+    setActiveNode: (nodeId) => useTaskExecutionStore.getState().setActiveNode(nodeId),
+    setIsRunning: (running) => useTaskExecutionStore.getState().setIsRunning(running),
+    setIsLearning: (learning) => useTaskExecutionStore.getState().setIsLearning(learning),
+    setError: (error) => useTaskExecutionStore.getState().setError(error),
+    reset: () => useTaskExecutionStore.getState().reset(),
+    setPendingPlan: (plan) => useTaskExecutionStore.getState().setPendingPlan(plan),
+    setPendingStep: (step) => useTaskExecutionStore.getState().setPendingStep(step),
+    approvePlan: () => useTaskExecutionStore.getState().approvePlan(),
+    rejectPlan: () => useTaskExecutionStore.getState().rejectPlan(),
+    approveStep: () => useTaskExecutionStore.getState().approveStep(),
+    rejectStep: () => useTaskExecutionStore.getState().rejectStep(),
+    viewSession: (id) => useSessionStore.getState().viewSession(id),
+    deleteSession: (id) => useSessionStore.getState().deleteSession(id),
+    clearSessions: () => useSessionStore.getState().clearSessions(),
+    loadSessions: () => useSessionStore.getState().loadSessions(),
+    loadMoreSessions: () => useSessionStore.getState().loadMoreSessions(),
+    setQueue: (queue) => useQueueStore.getState().setQueue(queue),
+    removeFromQueue: (id) => useQueueStore.getState().removeFromQueue(id),
+    setExecutionMode: (mode) => useQueueStore.getState().setExecutionMode(mode),
+    setAutoReview: (auto) => useQueueStore.getState().setAutoReview(auto),
+    // TaskActions
+    startTask: async (prompt) => {
+      const brainId = useBrainStore.getState().currentBrainId
+      if (!brainId) {
+        useTaskExecutionStore.getState().setError('请先选择一个大脑')
+        return
+      }
+
+      const execState = useTaskExecutionStore.getState()
+      const sessionState = useSessionStore.getState()
+      if (sessionState.activeSessionId && (execState.isRunning || execState.isLearning)) {
+        await persistSession(
+          sessionState.activeSessionId,
+          execState.agentOutput,
+          execState.thinkingSteps,
+          'success'
+        )
+      }
+
+      let serverSession: ChatSessionDTO
+      try {
+        serverSession = await chatSessionsApi.create({ brainId, type: 'task', prompt })
+      } catch (e) {
+        useTaskExecutionStore.getState().setError(e instanceof Error ? e.message : '创建会话失败')
+        return
+      }
+
+      const newSession: ChatSession = dtoToSession(serverSession)
+
+      useTaskExecutionStore.getState().reset()
+      useTaskExecutionStore.getState().setIsRunning(true)
+      useTaskExecutionStore.getState().setError(null)
+      useSessionStore.getState().addSession(newSession)
+
+      try {
+        await taskApi.execute(prompt, brainId, useQueueStore.getState().executionMode, useSettingsStore.getState().enabledTools)
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : '任务执行失败'
+        useTaskExecutionStore.getState().setError(errMsg)
+        chatSessionsApi.update(newSession.id, { status: 'error' }).catch(() => {})
+        useSessionStore.getState().updateSession(newSession.id, { status: 'error' })
+      }
+    },
+    learnTopic: async (topic) => {
+      const brainId = useBrainStore.getState().currentBrainId
+      if (!brainId) {
+        useTaskExecutionStore.getState().setError('请先选择一个大脑')
+        return
+      }
+
+      const execState = useTaskExecutionStore.getState()
+      const sessionState = useSessionStore.getState()
+      if (sessionState.activeSessionId && (execState.isRunning || execState.isLearning)) {
+        await persistSession(
+          sessionState.activeSessionId,
+          execState.agentOutput,
+          execState.thinkingSteps,
+          'success'
+        )
+      }
+
+      const displayPrompt = `学习: ${topic}`
+      let serverSession: ChatSessionDTO
+      try {
+        serverSession = await chatSessionsApi.create({ brainId, type: 'learn', prompt: displayPrompt })
+      } catch (e) {
+        useTaskExecutionStore.getState().setError(e instanceof Error ? e.message : '创建会话失败')
+        return
+      }
+
+      const newSession: ChatSession = dtoToSession(serverSession)
+
+      useTaskExecutionStore.getState().reset()
+      useTaskExecutionStore.getState().setIsLearning(true)
+      useTaskExecutionStore.getState().setError(null)
+      useSessionStore.getState().addSession(newSession)
+
+      try {
+        await learnApi.learn(topic, brainId)
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : '学习失败'
+        useTaskExecutionStore.getState().setError(errMsg)
+        chatSessionsApi.update(newSession.id, { status: 'error' }).catch(() => {})
+        useSessionStore.getState().updateSession(newSession.id, { status: 'error' })
+      }
+    },
+    persistCurrentSession: async () => {
+      const execState = useTaskExecutionStore.getState()
+      const sessionState = useSessionStore.getState()
+      if (sessionState.activeSessionId && (execState.isRunning || execState.isLearning)) {
+        await persistSession(
+          sessionState.activeSessionId,
+          execState.agentOutput,
+          execState.thinkingSteps,
+          execState.error ? 'error' : 'success'
+        )
+      }
+    },
+  }))
+)
+
+// 导出 legacy store 作为 useTaskStore
+// 使用类型断言来处理 TypeScript 类型限制
+export const useTaskStore = legacyStore as unknown as (typeof legacyStore & {
+  getState: () => LegacyTaskStore
+})
+
+// 添加 getState 方法
+const legacyGetState = (): LegacyTaskStore => {
+  const execState = useTaskExecutionStore.getState()
+  const sessionState = useSessionStore.getState()
+  const queueState = useQueueStore.getState()
+  return {
+    isRunning: execState.isRunning,
+    isLearning: execState.isLearning,
+    currentTaskPrompt: execState.currentTaskPrompt,
+    thinkingSteps: execState.thinkingSteps,
+    agentOutput: execState.agentOutput,
+    activeEdgeIds: execState.activeEdgeIds,
+    activeNodeId: execState.activeNodeId,
+    error: execState.error,
+    pendingPlan: execState.pendingPlan,
+    pendingStep: execState.pendingStep,
+    sessions: sessionState.sessions,
+    activeSessionId: sessionState.activeSessionId,
+    viewingSessionId: sessionState.viewingSessionId,
+    sessionsHasMore: sessionState.sessionsHasMore,
+    sessionsLoading: sessionState.sessionsLoading,
+    sessionsCursor: sessionState.sessionsCursor,
+    queue: queueState.queue,
+    executionMode: queueState.executionMode,
+    autoReview: queueState.autoReview,
+    addThinkingStep: execState.addThinkingStep,
+    mergeAgentStream: execState.mergeAgentStream,
+    addToolCall: execState.addToolCall,
+    updateToolCall: execState.updateToolCall,
+    appendAgentOutput: execState.appendAgentOutput,
+    setActiveEdge: execState.setActiveEdge,
+    setActiveNode: execState.setActiveNode,
+    setIsRunning: execState.setIsRunning,
+    setIsLearning: execState.setIsLearning,
+    setError: execState.setError,
+    reset: execState.reset,
+    setPendingPlan: execState.setPendingPlan,
+    setPendingStep: execState.setPendingStep,
+    approvePlan: execState.approvePlan,
+    rejectPlan: execState.rejectPlan,
+    approveStep: execState.approveStep,
+    rejectStep: execState.rejectStep,
+    viewSession: sessionState.viewSession,
+    deleteSession: sessionState.deleteSession,
+    clearSessions: sessionState.clearSessions,
+    loadSessions: sessionState.loadSessions,
+    loadMoreSessions: sessionState.loadMoreSessions,
+    setQueue: queueState.setQueue,
+    removeFromQueue: queueState.removeFromQueue,
+    setExecutionMode: queueState.setExecutionMode,
+    setAutoReview: queueState.setAutoReview,
+    startTask: (useTaskStore as unknown as LegacyTaskStore).startTask,
+    learnTopic: (useTaskStore as unknown as LegacyTaskStore).learnTopic,
+    persistCurrentSession: (useTaskStore as unknown as LegacyTaskStore).persistCurrentSession,
+  }
+}
+Object.assign(useTaskStore, { getState: legacyGetState })
+
+// ============================================================================
+// 派生状态缓存 Hooks
+// ============================================================================
+
+/**
+ * 获取当前活动的会话
+ */
+export function useActiveSession() {
+  return useSessionStore(
+    useShallow((state) => state.sessions.find((s) => s.id === state.activeSessionId))
+  )
 }
 
-export const useTaskStore = create<TaskState>((set, get) => ({
-  ...initialState,
+/**
+ * 获取当前查看的会话
+ */
+export function useViewingSession() {
+  return useSessionStore(
+    useShallow((state) => {
+      const id = state.viewingSessionId ?? state.activeSessionId
+      return state.sessions.find((s) => s.id === id)
+    })
+  )
+}
 
-  startTask: async (prompt) => {
-    const brainId = useBrainStore.getState().currentBrainId
-    if (!brainId) {
-      set({ error: '请先选择一个大脑' })
-      return
-    }
+/**
+ * 获取会话列表（排除running状态）
+ */
+export function useCompletedSessions() {
+  return useSessionStore(
+    useShallow((state) => state.sessions.filter((s) => s.status !== 'running'))
+  )
+}
 
-    // 先持久化上一轮
-    const prev = get()
-    if (prev.activeSessionId && (prev.isRunning || prev.isLearning)) {
-      await persistSession(prev)
-    }
+/**
+ * 获取正在运行的会话
+ */
+export function useRunningSession() {
+  return useSessionStore(
+    useShallow((state) => state.sessions.find((s) => s.status === 'running'))
+  )
+}
 
-    // 在后端创建新会话
-    let serverSession: ChatSessionDTO
-    try {
-      serverSession = await chatSessionsApi.create({ brainId, type: 'task', prompt })
-    } catch (e) {
-      set({ error: e instanceof Error ? e.message : '创建会话失败' })
-      return
-    }
-
-    const newSession: ChatSession = dtoToSession(serverSession)
-
-    set((s) => ({
-      sessions: [...s.sessions.filter((ss) => ss.status !== 'running'), newSession],
-      activeSessionId: newSession.id,
-      viewingSessionId: null,
-      isRunning: true,
-      currentTaskPrompt: prompt,
-      thinkingSteps: [],
-      agentOutput: '',
-      activeEdgeIds: new Set<string>(),
-      activeNodeId: null,
-      error: null,
+/**
+ * 获取执行状态的简写
+ */
+export function useExecutionState() {
+  return useTaskExecutionStore(
+    useShallow((state) => ({
+      isRunning: state.isRunning,
+      isLearning: state.isLearning,
+      error: state.error,
     }))
+  )
+}
 
-    try {
-      await taskApi.execute(prompt, brainId, get().executionMode, useSettingsStore.getState().enabledTools)
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : '任务执行失败'
-      set({ isRunning: false, error: errMsg })
-      // 更新后端状态
-      chatSessionsApi.update(newSession.id, { status: 'error' }).catch(() => {})
-      set((s) => ({
-        sessions: s.sessions.map((ss) =>
-          ss.id === newSession.id ? { ...ss, status: 'error' as const } : ss,
-        ),
-      }))
-    }
-  },
-
-  learnTopic: async (topic) => {
-    const brainId = useBrainStore.getState().currentBrainId
-    if (!brainId) {
-      set({ error: '请先选择一个大脑' })
-      return
-    }
-
-    const prev = get()
-    if (prev.activeSessionId && (prev.isRunning || prev.isLearning)) {
-      await persistSession(prev)
-    }
-
-    const displayPrompt = `学习: ${topic}`
-    let serverSession: ChatSessionDTO
-    try {
-      serverSession = await chatSessionsApi.create({ brainId, type: 'learn', prompt: displayPrompt })
-    } catch (e) {
-      set({ error: e instanceof Error ? e.message : '创建会话失败' })
-      return
-    }
-
-    const newSession: ChatSession = dtoToSession(serverSession)
-
-    set((s) => ({
-      sessions: [...s.sessions.filter((ss) => ss.status !== 'running'), newSession],
-      activeSessionId: newSession.id,
-      viewingSessionId: null,
-      isLearning: true,
-      currentTaskPrompt: displayPrompt,
-      thinkingSteps: [],
-      agentOutput: '',
-      activeEdgeIds: new Set<string>(),
-      activeNodeId: null,
-      error: null,
-    }))
-
-    try {
-      await learnApi.learn(topic, brainId)
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : '学习失败'
-      set({ isLearning: false, error: errMsg })
-      chatSessionsApi.update(newSession.id, { status: 'error' }).catch(() => {})
-      set((s) => ({
-        sessions: s.sessions.map((ss) =>
-          ss.id === newSession.id ? { ...ss, status: 'error' as const } : ss,
-        ),
-      }))
-    }
-  },
-
-  addThinkingStep: (step) =>
-    set((state) => ({
-      thinkingSteps: [...state.thinkingSteps, step],
-    })),
-
-  mergeAgentStream: (payload, timestamp) =>
-    set((state) => {
-      const steps = state.thinkingSteps
-      const lastStep = steps[steps.length - 1]
-
-      if (lastStep && lastStep.type === 'agent_stream') {
-        const prevData = lastStep.data as AgentStreamPayload
-        const merged: ThinkingStep = {
-          ...lastStep,
-          timestamp,
-          data: {
-            chunk: prevData.chunk + payload.chunk,
-            done: payload.done,
-            trace: payload.trace ?? prevData.trace,
-          },
+/**
+ * 获取思考步骤的统计信息
+ */
+export function useThinkingStepsStats() {
+  return useTaskExecutionStore(
+    useShallow((state) => {
+      const stats = {
+        totalSteps: state.thinkingSteps.length,
+        leaderSteps: 0,
+        agentStreams: 0,
+        toolCalls: 0,
+        decisions: 0,
+      }
+      for (const step of state.thinkingSteps) {
+        switch (step.type) {
+          case 'leader_step':
+            stats.leaderSteps++
+            break
+          case 'agent_stream':
+            stats.agentStreams++
+            break
+          case 'tool_call':
+            stats.toolCalls++
+            break
+          case 'leader_decision':
+            stats.decisions++
+            break
         }
-        return { thinkingSteps: [...steps.slice(0, -1), merged] }
       }
-
-      return {
-        thinkingSteps: [
-          ...steps,
-          {
-            id: `agent-stream-${Date.now()}-${++agentStepIdCounter}`,
-            type: 'agent_stream' as const,
-            timestamp,
-            data: payload,
-          },
-        ],
-      }
-    }),
-
-  addToolCall: (payload, timestamp) =>
-    set((state) => ({
-      thinkingSteps: [
-        ...state.thinkingSteps,
-        {
-          id: `tool-call-${payload.callId}`,
-          type: 'tool_call' as const,
-          timestamp,
-          data: payload,
-        },
-      ],
-    })),
-
-  updateToolCall: (callId, payload, timestamp) =>
-    set((state) => ({
-      thinkingSteps: state.thinkingSteps.map((step) =>
-        step.type === 'tool_call' && (step.data as ToolCallPayload).callId === callId
-          ? { ...step, timestamp, data: payload }
-          : step,
-      ),
-    })),
-
-  appendAgentOutput: (chunk) =>
-    set((state) => ({
-      agentOutput: state.agentOutput + chunk,
-    })),
-
-  setActiveEdge: (edgeId) =>
-    set((state) => ({
-      activeEdgeIds: edgeId
-        ? new Set([...state.activeEdgeIds, edgeId])
-        : state.activeEdgeIds,
-    })),
-
-  setActiveNode: (nodeId) =>
-    set({ activeNodeId: nodeId }),
-
-  setIsRunning: (running) => {
-    if (!running) {
-      const state = get()
-      // 任务结束，持久化到后端
-      if (state.activeSessionId) {
-        chatSessionsApi.update(state.activeSessionId, {
-          agentOutput: state.agentOutput,
-          thinkingSteps: state.thinkingSteps,
-          status: 'success',
-        }).catch(() => {})
-      }
-      set((s) => ({
-        isRunning: false,
-        sessions: s.sessions.map((ss) =>
-          ss.id === s.activeSessionId
-            ? { ...ss, status: 'success' as const, thinkingSteps: s.thinkingSteps, agentOutput: s.agentOutput }
-            : ss,
-        ),
-      }))
-    } else {
-      set({ isRunning: true })
-    }
-  },
-
-  setIsLearning: (learning) => {
-    if (!learning) {
-      const state = get()
-      if (state.activeSessionId) {
-        chatSessionsApi.update(state.activeSessionId, {
-          agentOutput: state.agentOutput,
-          thinkingSteps: state.thinkingSteps,
-          status: 'success',
-        }).catch(() => {})
-      }
-      set((s) => ({
-        isLearning: false,
-        sessions: s.sessions.map((ss) =>
-          ss.id === s.activeSessionId
-            ? { ...ss, status: 'success' as const, thinkingSteps: s.thinkingSteps, agentOutput: s.agentOutput }
-            : ss,
-        ),
-      }))
-    } else {
-      set({ isLearning: true })
-    }
-  },
-
-  setError: (error) => {
-    const state = get()
-    if (state.activeSessionId) {
-      chatSessionsApi.update(state.activeSessionId, {
-        agentOutput: state.agentOutput,
-        thinkingSteps: state.thinkingSteps,
-        status: 'error',
-      }).catch(() => {})
-    }
-    set((s) => ({
-      isRunning: false,
-      error,
-      sessions: s.activeSessionId
-        ? s.sessions.map((ss) =>
-            ss.id === s.activeSessionId
-              ? { ...ss, status: 'error' as const, thinkingSteps: s.thinkingSteps, agentOutput: s.agentOutput }
-              : ss,
-          )
-        : s.sessions,
-    }))
-  },
-
-  reset: () => set({ ...initialState, activeEdgeIds: new Set<string>() }),
-
-  viewSession: (id) =>
-    set({ viewingSessionId: id }),
-
-  deleteSession: (id) => {
-    chatSessionsApi.delete(id).catch(() => {})
-    set((state) => ({
-      sessions: state.sessions.filter((s) => s.id !== id),
-      viewingSessionId: state.viewingSessionId === id ? null : state.viewingSessionId,
-    }))
-  },
-
-  clearSessions: () =>
-    set({ sessions: [], viewingSessionId: null }),
-
-  loadSessions: async () => {
-    const brainId = useBrainStore.getState().currentBrainId
-    set({ sessionsLoading: true })
-    try {
-      const result = await chatSessionsApi.getPage(brainId ?? undefined)
-      set({
-        sessions: result.items.map(dtoToSession),
-        sessionsHasMore: result.hasMore,
-        sessionsCursor: result.nextCursor ?? null,
-        sessionsLoading: false,
-      })
-    } catch (e) {
-      console.error('加载会话历史失败:', e)
-      set({ sessionsLoading: false })
-    }
-  },
-
-  loadMoreSessions: async () => {
-    const { sessionsHasMore, sessionsLoading, sessionsCursor } = get()
-    if (!sessionsHasMore || sessionsLoading) return
-    const brainId = useBrainStore.getState().currentBrainId
-    set({ sessionsLoading: true })
-    try {
-      const result = await chatSessionsApi.getPage(brainId ?? undefined, sessionsCursor ?? undefined)
-      set((s) => ({
-        sessions: [...s.sessions, ...result.items.map(dtoToSession)],
-        sessionsHasMore: result.hasMore,
-        sessionsCursor: result.nextCursor ?? null,
-        sessionsLoading: false,
-      }))
-    } catch (e) {
-      console.error('加载更多会话失败:', e)
-      set({ sessionsLoading: false })
-    }
-  },
-
-  setQueue: (queue) => set({ queue }),
-
-  removeFromQueue: async (id) => {
-    try {
-      await taskApi.removeFromQueue(id)
-      set((s) => ({ queue: s.queue.filter((q) => q.id !== id) }))
-    } catch (e) {
-      console.error('取消排队失败:', e)
-    }
-  },
-
-  setExecutionMode: (mode) => {
-    localStorage.setItem('llm-brain-exec-mode', mode)
-    set({ executionMode: mode })
-  },
-
-  setAutoReview: (auto) => {
-    localStorage.setItem('llm-brain-auto-review', String(auto))
-    set({ autoReview: auto })
-  },
-
-  setPendingPlan: (plan) => set({ pendingPlan: plan }),
-  setPendingStep: (step) => set({ pendingStep: step }),
-
-  approvePlan: () => {
-    wsClient.send('plan_response', { approved: true })
-    set({ pendingPlan: null })
-  },
-
-  rejectPlan: () => {
-    wsClient.send('plan_response', { approved: false })
-    set({ pendingPlan: null })
-  },
-
-  approveStep: () => {
-    wsClient.send('step_response', { approved: true })
-    set({ pendingStep: null })
-  },
-
-  rejectStep: () => {
-    wsClient.send('step_response', { approved: false })
-    set({ pendingStep: null })
-  },
-}))
+      return stats
+    })
+  )
+}

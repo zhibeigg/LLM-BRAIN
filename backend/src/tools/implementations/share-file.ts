@@ -1,11 +1,31 @@
 import type { ToolResult, ToolContext } from '../../types/index.js'
 import { writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, resolve, normalize } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 const SHARE_DIR = join(process.cwd(), '.shares')
 // 内存中维护分享记录（简单实现，重启后失效）
 const shares = new Map<string, { filePath: string; fileName: string; createdAt: number; expiresAt: number }>()
+
+/** 检查路径是否在允许的范围内（项目工作目录下） */
+function isSafePath(filePath: string): boolean {
+  const normalized = resolve(normalize(filePath))
+  const cwd = resolve(process.cwd())
+
+  // 只允许访问工作目录及其子目录下的文件
+  if (!normalized.startsWith(cwd)) {
+    return false
+  }
+
+  // 禁止访问 .env 等敏感文件
+  const name = basename(normalized).toLowerCase()
+  const sensitiveFiles = ['.env', '.env.local', '.env.production', 'credentials', 'secrets']
+  if (sensitiveFiles.some(s => name.includes(s))) {
+    return false
+  }
+
+  return true
+}
 
 /**
  * 文件分享工具 — 生成临时下载链接
@@ -29,7 +49,10 @@ export async function executeShareFile(
       filePath = join(SHARE_DIR, `${id}-${fileName}`)
       writeFileSync(filePath, args.content, 'utf-8')
     } else if (args.path) {
-      // 引用已有文件
+      // 引用已有文件 — 路径安全检查
+      if (!isSafePath(args.path)) {
+        return { success: false, output: '', error: `不允许访问该路径: ${args.path}` }
+      }
       if (!existsSync(args.path)) {
         return { success: false, output: '', error: `文件不存在: ${args.path}` }
       }

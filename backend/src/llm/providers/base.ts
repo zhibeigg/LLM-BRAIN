@@ -30,6 +30,7 @@ export interface ChatCompletionOptions {
 
 export interface ChatCompletionResult {
   content: string
+  model?: string
   tool_calls?: Array<{
     id: string
     type: 'function'

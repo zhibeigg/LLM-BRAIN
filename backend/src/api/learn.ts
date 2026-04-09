@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { orchestrator } from '../llm/orchestrator.js'
+import { getBrainById } from '../db/brains.js'
 
 export const learnRouter = Router()
 
@@ -16,7 +17,18 @@ learnRouter.post('/', async (req, res) => {
       return
     }
 
-    const item = orchestrator.enqueue('learn', topic, brainId)
+    // 校验 brainId 所有权
+    const brain = getBrainById(brainId)
+    if (!brain) {
+      res.status(404).json({ error: '大脑不存在' })
+      return
+    }
+    if (brain.userId !== req.userId) {
+      res.status(403).json({ error: '无权操作该大脑' })
+      return
+    }
+
+    const item = await orchestrator.enqueue('learn', topic, brainId)
     const queued = orchestrator.running
     res.json({
       status: queued ? 'queued' : 'started',

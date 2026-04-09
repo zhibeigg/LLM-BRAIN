@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { orchestrator } from '../llm/orchestrator.js'
+import { getBrainById } from '../db/brains.js'
 import type { ExecutionMode } from '../types/index.js'
 
 export const taskRouter = Router()
@@ -17,6 +18,17 @@ taskRouter.post('/execute', async (req, res) => {
       return
     }
 
+    // 校验 brainId 所有权
+    const brain = getBrainById(brainId)
+    if (!brain) {
+      res.status(404).json({ error: '大脑不存在' })
+      return
+    }
+    if (brain.userId !== req.userId) {
+      res.status(403).json({ error: '无权操作该大脑' })
+      return
+    }
+
     const execMode = (['auto', 'plan', 'supervised', 'readonly'].includes(mode) ? mode : undefined) as ExecutionMode | undefined
 
     if (execMode === 'readonly') {
@@ -25,7 +37,7 @@ taskRouter.post('/execute', async (req, res) => {
     }
 
     const tools = Array.isArray(enabledTools) ? enabledTools as string[] : undefined
-    const item = orchestrator.enqueue('task', prompt, brainId, execMode, tools)
+    const item = await orchestrator.enqueue('task', prompt, brainId, execMode, tools)
     const queued = orchestrator.running
     res.json({
       status: queued ? 'queued' : 'started',
@@ -49,8 +61,8 @@ taskRouter.get('/queue', (_req, res) => {
 })
 
 // DELETE /api/task/queue/:id - 取消排队
-taskRouter.delete('/queue/:id', (req, res) => {
-  const removed = orchestrator.removeFromQueue(req.params.id)
+taskRouter.delete('/queue/:id', async (req, res) => {
+  const removed = await orchestrator.removeFromQueue(req.params.id)
   if (removed) {
     res.json({ status: 'removed' })
   } else {

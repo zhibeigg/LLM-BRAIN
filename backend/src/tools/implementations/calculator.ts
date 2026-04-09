@@ -13,10 +13,13 @@ export async function executeCalculator(
 
     // 安全校验：只允许数字、运算符、括号、数学函数
     const sanitized = expression.trim()
-    const allowed = /^[\d\s+\-*/().,%^eE]+$/
-    const hasMathFn = /\b(Math\.\w+|sqrt|pow|abs|ceil|floor|round|sin|cos|tan|log|exp|PI|E)\b/
 
-    if (!allowed.test(sanitized) && !hasMathFn.test(sanitized)) {
+    // 先检查是否只包含安全字符（数字、运算符、括号、空格、小数点）和数学函数名
+    const mathFnNames = /\b(Math\.\w+|sqrt|pow|abs|ceil|floor|round|sin|cos|tan|log|exp|PI|E)\b/g
+    const withoutMathFns = sanitized.replace(mathFnNames, '0') // 将数学函数替换为数字后再检查
+    const allowed = /^[\d\s+\-*/().^eE]+$/
+
+    if (!allowed.test(withoutMathFns)) {
       return { success: false, output: '', error: '表达式包含不允许的字符' }
     }
 

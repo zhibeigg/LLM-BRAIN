@@ -54,6 +54,11 @@ export class AgentRole extends LLMRoleBase {
         return content
       }
 
+      // 有 tool_calls 且有中间思考内容时，推送给前端
+      if (result.content) {
+        broadcast('agent_stream', { chunk: result.content, done: false } satisfies AgentStreamPayload)
+      }
+
       // 有 tool_calls：将 assistant 消息（含 tool_calls）加入上下文
       messages.push({
         role: 'assistant',

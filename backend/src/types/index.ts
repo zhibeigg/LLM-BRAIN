@@ -2,6 +2,7 @@
 
 export interface Brain {
   id: string
+  userId: string
   name: string
   description: string
   projectPath: string
@@ -290,12 +291,14 @@ export interface PlanReadyPayload {
   }>
   memoryContext: string
   totalSteps: number
+  requestId?: string
 }
 
 export interface StepConfirmPayload {
   stepId: string
   type: 'leader_decision' | 'agent_execute'
   description: string
+  requestId?: string
 }
 
 /** 前端发回后端的消息类型 */

@@ -10,9 +10,18 @@ import {
   deleteNode,
 } from '../db/nodes.js'
 import { getAllEdges } from '../db/edges.js'
+import { getBrainById } from '../db/brains.js'
 import { sugiyamaLayout } from '../core/graph/layout.js'
 
 export const nodesRouter = Router()
+
+/** 校验 brainId 是否属于当前用户 */
+function verifyBrainOwnership(brainId: string, userId: string): { ok: boolean; status?: number; error?: string } {
+  const brain = getBrainById(brainId)
+  if (!brain) return { ok: false, status: 404, error: '大脑不存在' }
+  if (brain.userId !== userId) return { ok: false, status: 403, error: '无权访问该大脑的资源' }
+  return { ok: true }
+}
 
 // GET / - 获取节点，支持 ?brainId= 和 ?type= 过滤
 nodesRouter.get('/', (req, res) => {
@@ -23,6 +32,11 @@ nodesRouter.get('/', (req, res) => {
     if (type && type !== 'personality' && type !== 'memory') {
       res.status(400).json({ error: 'Invalid type' })
       return
+    }
+
+    if (brainId) {
+      const check = verifyBrainOwnership(brainId, req.userId ?? '')
+      if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
     }
 
     let nodes = brainId ? getNodesByBrainId(brainId) : getAllNodes()
@@ -43,6 +57,9 @@ nodesRouter.post('/auto-layout', (req, res) => {
       res.status(400).json({ error: 'brainId is required' })
       return
     }
+
+    const check = verifyBrainOwnership(brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
 
     const nodes = getNodesByBrainId(brainId)
     if (nodes.length === 0) {
@@ -82,6 +99,8 @@ nodesRouter.get('/:id', (req, res) => {
   try {
     const node = getNodeById(req.params.id)
     if (!node) { res.status(404).json({ error: 'Node not found' }); return }
+    const check = verifyBrainOwnership(node.brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
     res.json(node)
   } catch (e) {
     res.status(500).json({ error: String(e) })
@@ -96,6 +115,10 @@ nodesRouter.post('/', (req, res) => {
       res.status(400).json({ error: 'brainId, type and title are required' })
       return
     }
+
+    const check = verifyBrainOwnership(brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
+
     // 性格节点每个大脑只能有一个，由 createBrain 自动创建
     if (type === 'personality') {
       const existing = getNodesByBrainId(brainId)
@@ -123,6 +146,10 @@ nodesRouter.post('/', (req, res) => {
 // PUT /:id
 nodesRouter.put('/:id', (req, res) => {
   try {
+    const existing = getNodeById(req.params.id)
+    if (!existing) { res.status(404).json({ error: 'Node not found' }); return }
+    const check = verifyBrainOwnership(existing.brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
     const node = updateNode(req.params.id, req.body)
     if (!node) { res.status(404).json({ error: 'Node not found' }); return }
     res.json(node)
@@ -136,6 +163,8 @@ nodesRouter.delete('/:id', (req, res) => {
   try {
     const node = getNodeById(req.params.id)
     if (!node) { res.status(404).json({ error: 'Node not found' }); return }
+    const check = verifyBrainOwnership(node.brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
     if (node.type === 'personality') {
       res.status(403).json({ error: '性格节点不可删除，它是大脑的入口节点' })
       return

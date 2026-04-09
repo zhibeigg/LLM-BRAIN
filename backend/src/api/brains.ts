@@ -21,6 +21,10 @@ brainsRouter.get('/:id', (req, res) => {
       res.status(404).json({ error: '大脑不存在' })
       return
     }
+    if (brain.userId !== req.userId) {
+      res.status(403).json({ error: '无权访问该大脑' })
+      return
+    }
     res.json(brain)
   } catch (e) {
     res.status(500).json({ error: String(e) })
@@ -52,11 +56,16 @@ brainsRouter.post('/', (req, res) => {
 // PUT /:id - 更新大脑
 brainsRouter.put('/:id', (req, res) => {
   try {
-    const brain = updateBrain(req.params.id, req.body)
-    if (!brain) {
+    const existing = getBrainById(req.params.id)
+    if (!existing) {
       res.status(404).json({ error: '大脑不存在' })
       return
     }
+    if (existing.userId !== req.userId) {
+      res.status(403).json({ error: '无权修改该大脑' })
+      return
+    }
+    const brain = updateBrain(req.params.id, req.body)
     res.json(brain)
   } catch (e) {
     res.status(500).json({ error: String(e) })
@@ -66,11 +75,16 @@ brainsRouter.put('/:id', (req, res) => {
 // DELETE /:id - 删除大脑
 brainsRouter.delete('/:id', (req, res) => {
   try {
-    const deleted = deleteBrain(req.params.id)
-    if (!deleted) {
+    const existing = getBrainById(req.params.id)
+    if (!existing) {
       res.status(404).json({ error: '大脑不存在' })
       return
     }
+    if (existing.userId !== req.userId) {
+      res.status(403).json({ error: '无权删除该大脑' })
+      return
+    }
+    deleteBrain(req.params.id)
     res.status(204).send()
   } catch (e) {
     res.status(500).json({ error: String(e) })

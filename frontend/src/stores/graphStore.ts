@@ -2,16 +2,36 @@ import { create } from 'zustand'
 import type { MemoryNode, MemoryEdge } from '../types'
 import { nodesApi, edgesApi } from '../services/api'
 
+/** 布局配置选项 */
+export interface AutoLayoutOptions {
+  /** 是否使用前端Worker布局 */
+  useWorker?: boolean
+  /** 迭代次数 */
+  iterations?: number
+  /** 节点排斥力 */
+  repulsion?: number
+  /** 边吸引力 */
+  attraction?: number
+  /** 阻尼系数 */
+  damping?: number
+  /** 是否启用层级布局 */
+  hierarchical?: boolean
+}
+
 interface GraphState {
   nodes: MemoryNode[]
   edges: MemoryEdge[]
   selectedNodeId: string | null
+  selectedEdgeId: string | null
   newNodeIds: Set<string>
   loading: boolean
   error: string | null
+  isLayouting: boolean
+  layoutProgress: number
 
   fetchGraph: () => Promise<void>
   selectNode: (id: string | null) => void
+  selectEdge: (id: string | null) => void
   addNode: (node: Omit<MemoryNode, 'id' | 'createdAt' | 'updatedAt'>) => Promise<MemoryNode>
   updateNode: (id: string, updates: Partial<MemoryNode>) => Promise<void>
   deleteNode: (id: string) => Promise<void>
@@ -19,19 +39,22 @@ interface GraphState {
   updateEdge: (id: string, updates: Partial<MemoryEdge>) => Promise<void>
   deleteEdge: (id: string) => Promise<void>
   updateNodePosition: (id: string, x: number, y: number) => Promise<void>
-  autoLayout: () => Promise<void>
+  autoLayout: (options?: AutoLayoutOptions) => Promise<void>
   addNewNodeId: (id: string) => void
   dismissNewNode: (id: string) => Promise<void>
   clearNewNodeIds: () => void
 }
 
-export const useGraphStore = create<GraphState>((set) => ({
+export const useGraphStore = create<GraphState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
+  selectedEdgeId: null,
   newNodeIds: new Set<string>(),
   loading: false,
   error: null,
+  isLayouting: false,
+  layoutProgress: 0,
 
   fetchGraph: async () => {
     set({ loading: true, error: null })
@@ -55,7 +78,11 @@ export const useGraphStore = create<GraphState>((set) => ({
   },
 
   selectNode: (id) => {
-    set({ selectedNodeId: id })
+    set({ selectedNodeId: id, selectedEdgeId: null })
+  },
+
+  selectEdge: (id) => {
+    set({ selectedEdgeId: id, selectedNodeId: null })
   },
 
   addNode: async (node) => {
@@ -144,20 +171,118 @@ export const useGraphStore = create<GraphState>((set) => ({
     }
   },
 
-  autoLayout: async () => {
-    try {
-      const { useBrainStore } = await import('./brainStore')
-      const brainId = useBrainStore.getState().currentBrainId
-      if (!brainId) throw new Error('未选择大脑')
-      const updatedNodes = await nodesApi.autoLayout(brainId)
-      set((state) => {
-        const updatedMap = new Map(updatedNodes.map(n => [n.id, n]))
-        return {
-          nodes: state.nodes.map(n => updatedMap.get(n.id) ?? n),
-        }
-      })
-    } catch (e) {
-      console.error('自动布局失败:', e)
+  autoLayout: async (options?: AutoLayoutOptions) => {
+    const { nodes, edges } = get()
+    if (nodes.length === 0) return
+
+    // 默认使用前端Worker布局
+    const useWorker = options?.useWorker ?? true
+
+    if (useWorker) {
+      // 使用前端Web Worker进行布局
+      set({ isLayouting: true, layoutProgress: 0, error: null })
+
+      try {
+        // 创建Web Worker进行布局计算
+        const worker = new Worker(
+          new URL('../workers/graphLayout.worker.ts', import.meta.url),
+          { type: 'module' }
+        )
+
+        return new Promise<void>((resolve, reject) => {
+          worker.onerror = (e) => {
+            console.error('布局Worker错误:', e)
+            set({ isLayouting: false, error: '布局计算失败' })
+            reject(new Error('布局计算失败'))
+          }
+
+          worker.onmessage = async (event) => {
+            const { type, nodes: layoutNodes, progress, error } = event.data
+
+            switch (type) {
+              case 'progress':
+                set({ layoutProgress: progress ?? 0 })
+                break
+
+              case 'complete':
+                if (layoutNodes) {
+                  // 更新节点位置
+                  const positionMap = new Map(layoutNodes.map(n => [n.id, n]))
+                  set((state) => ({
+                    nodes: state.nodes.map(n => {
+                      const pos = positionMap.get(n.id)
+                      if (pos) {
+                        return { ...n, positionX: pos.x, positionY: pos.y }
+                      }
+                      return n
+                    }),
+                    isLayouting: false,
+                    layoutProgress: 1,
+                  }))
+
+                  // 异步保存到后端
+                  const { useBrainStore } = await import('./brainStore')
+                  const brainId = useBrainStore.getState().currentBrainId
+                  if (brainId) {
+                    const updatedNodes = layoutNodes.map((n: { id: string; x: number; y: number }) => ({
+                      id: n.id,
+                      positionX: n.x,
+                      positionY: n.y,
+                    }))
+                    nodesApi.updateBatch(brainId, updatedNodes).catch(err => {
+                      console.error('保存布局到后端失败:', err)
+                    })
+                  }
+                }
+                worker.terminate()
+                resolve()
+                break
+
+              case 'error':
+                console.error('布局失败:', error)
+                set({ isLayouting: false, error: error ?? '布局失败' })
+                worker.terminate()
+                reject(new Error(error))
+                break
+            }
+          }
+
+          // 发送布局请求
+          worker.postMessage({
+            type: 'start',
+            nodes,
+            edges,
+            options: {
+              iterations: options?.iterations ?? 100,
+              repulsion: options?.repulsion ?? 5000,
+              attraction: options?.attraction ?? 0.1,
+              damping: options?.damping ?? 0.85,
+              hierarchical: options?.hierarchical ?? false,
+            },
+          })
+        })
+      } catch (e) {
+        console.error('前端布局失败，回退到后端布局:', e)
+        // 回退到后端布局
+        return get().autoLayout({ ...options, useWorker: false })
+      }
+    } else {
+      // 使用后端API布局
+      try {
+        const { useBrainStore } = await import('./brainStore')
+        const brainId = useBrainStore.getState().currentBrainId
+        if (!brainId) throw new Error('未选择大脑')
+        const updatedNodes = await nodesApi.autoLayout(brainId)
+        set((state) => {
+          const updatedMap = new Map(updatedNodes.map(n => [n.id, n]))
+          return {
+            nodes: state.nodes.map(n => updatedMap.get(n.id) ?? n),
+          }
+        })
+      } catch (e) {
+        console.error('自动布局失败:', e)
+        throw e
+      }
     }
   },
 

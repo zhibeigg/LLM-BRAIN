@@ -5,13 +5,14 @@ import {
   IconButton, List, ListItem, ListItemText, ListItemSecondaryAction,
   Select, MenuItem, FormControl, InputLabel, Slider,
   Paper, CircularProgress, Alert, Chip, Snackbar,
-  ToggleButtonGroup, ToggleButton, Switch, Divider,
+  ToggleButtonGroup, ToggleButton, Switch, Divider, LinearProgress,
 } from '@mui/material'
 import {
   Delete as DeleteIcon, Edit as EditIcon,
   Radar as DetectIcon, Refresh as RefreshIcon,
   Close as CloseIcon,
   DarkMode as DarkModeIcon, LightMode as LightModeIcon,
+  Update as UpdateIcon,
 } from '@mui/icons-material'
 import { llmApi, toolsApi } from '../../services/api'
 import type { LLMProvider, LLMRoleConfig, LLMRole, ToolDefinition } from '../../types'
@@ -20,6 +21,7 @@ import { useColors, useThemeMode } from '../../ThemeContext'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { FontFamily, SendKey } from '../../stores/settingsStore'
 import type { ExecutionMode } from '../../types'
+import { useUpdater } from '../../hooks/useUpdater'
 
 interface SettingsDialogProps {
   open: boolean
@@ -41,6 +43,63 @@ const EXEC_MODE_OPTIONS: { value: ExecutionMode; label: string; desc: string }[]
   { value: 'supervised', label: '监督', desc: '每一步都需要确认' },
   { value: 'readonly', label: '只读', desc: '仅展示思考过程，不执行' },
 ]
+
+/** 更新检查组件 */
+function UpdaterSection() {
+  const c = useColors()
+  const { update, isChecking, isDownloading, downloadProgress, error, checkForUpdates, downloadAndInstall } = useUpdater()
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {error && (
+        <Alert severity="error" onClose={() => {}}>{error}</Alert>
+      )}
+
+      {update ? (
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <UpdateIcon sx={{ color: c.primary }} />
+            <Typography variant="body1" sx={{ color: c.text, fontWeight: 500 }}>
+              发现新版本: {update.latestVersion}
+            </Typography>
+          </Box>
+          {update.body && (
+            <Typography variant="body2" sx={{ color: c.textMuted, mb: 2, whiteSpace: 'pre-wrap' }}>
+              {update.body}
+            </Typography>
+          )}
+          {isDownloading ? (
+            <Box>
+              <Typography variant="caption" sx={{ color: c.textMuted, mb: 1, display: 'block' }}>
+                下载进度: {Math.round(downloadProgress)}%
+              </Typography>
+              <LinearProgress variant="determinate" value={downloadProgress} sx={{ height: 6, borderRadius: 3 }} />
+            </Box>
+          ) : (
+            <Button variant="contained" onClick={downloadAndInstall} startIcon={<UpdateIcon />}>
+              下载并安装更新
+            </Button>
+          )}
+        </Box>
+      ) : (
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="body2" sx={{ color: c.textMuted }}>
+            {isChecking ? '正在检查更新...' : '点击按钮检查是否有新版本'}
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={checkForUpdates}
+            disabled={isChecking}
+            startIcon={isChecking ? <CircularProgress size={16} /> : <RefreshIcon />}
+          >
+            {isChecking ? '检查中...' : '检查更新'}
+          </Button>
+        </Box>
+      )}
+    </Box>
+  )
+}
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const c = useColors()
@@ -229,6 +288,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     },
   }
 
+  /** 更新检查组件（已移至文件顶层） */
+
+  /** 技术栈项 */
+  function TechItem({ label, value }: { label: string; value: string }) {
+    return (
+      <Box>
+        <Typography variant="caption" sx={{ color: c.textMuted }}>{label}</Typography>
+        <Typography variant="body2" sx={{ color: c.text, fontWeight: 500 }}>{value}</Typography>
+      </Box>
+    )
+  }
+
   return (
     <>
       <Dialog open={open} onClose={onClose} fullScreen
@@ -257,6 +328,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               <Tab label="LLM 提供商" />
               <Tab label="角色配置" />
               <Tab label="工具" />
+              <Tab label="关于" />
             </Tabs>
           </Box>
 
@@ -617,6 +689,41 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     ))}
                   </Box>
                 )}
+              </Box>
+            )}
+
+            {/* ── Tab 7: 关于 ── */}
+            {tab === 7 && (
+              <Box>
+                <Paper elevation={0} sx={{ p: 3, mb: 3, bgcolor: c.bgCard, border: `1px solid ${c.border}`, textAlign: 'center' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: c.text, mb: 1 }}>
+                    LLM-BRAIN
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: c.textMuted, mb: 2 }}>
+                    有向记忆图 + 多角色 LLM 类脑智能体系统
+                  </Typography>
+                  <Chip label={`v0.1.0`} size="small" sx={{
+                    bgcolor: `${c.primary}15`, color: c.primary,
+                    border: `1px solid ${c.primary}30`,
+                  }} />
+                </Paper>
+
+                {groupTitle('检查更新')}
+                <Paper elevation={0} sx={{ p: 2.5, bgcolor: c.bgCard, border: `1px solid ${c.border}` }}>
+                  <UpdaterSection />
+                </Paper>
+
+                {groupTitle('技术栈')}
+                <Paper elevation={0} sx={{ p: 2.5, bgcolor: c.bgCard, border: `1px solid ${c.border}` }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                    <TechItem label="前端框架" value="React 19" />
+                    <TechItem label="UI 组件库" value="MUI 7" />
+                    <TechItem label="桌面框架" value="Tauri 2" />
+                    <TechItem label="图谱引擎" value="@xyflow/react" />
+                    <TechItem label="状态管理" value="Zustand 5" />
+                    <TechItem label="打包工具" value="Vite 8" />
+                  </Box>
+                </Paper>
               </Box>
             )}
           </Box>

@@ -286,12 +286,14 @@ export interface PlanReadyPayload {
   path: Array<{ nodeId: string; nodeTitle: string; nodeType: string }>
   memoryContext: string
   totalSteps: number
+  requestId?: string
 }
 
 export interface StepConfirmPayload {
   stepId: string
   type: 'leader_decision' | 'agent_execute'
   description: string
+  requestId?: string
 }
 
 // ===== 工具系统 =====

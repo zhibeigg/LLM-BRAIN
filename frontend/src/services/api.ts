@@ -90,6 +90,12 @@ export const nodesApi = {
       method: 'POST',
       body: JSON.stringify({ brainId }),
     }),
+
+  updateBatch: (brainId: string, nodes: Array<{ id: string; positionX: number; positionY: number }>) =>
+    request<void>('/nodes/batch-update', {
+      method: 'PUT',
+      body: JSON.stringify({ brainId, nodes }),
+    }),
 }
 
 // ===== 边 API =====

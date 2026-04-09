@@ -18,6 +18,7 @@ interface BrainRow {
 function rowToBrain(row: BrainRow): Brain {
   return {
     id: row.id,
+    userId: row.user_id,
     name: row.name,
     description: row.description,
     projectPath: row.project_path ?? '',

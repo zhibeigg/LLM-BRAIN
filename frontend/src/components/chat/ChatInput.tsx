@@ -22,6 +22,7 @@ import {
 import { useTaskStore } from '../../stores/taskStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useColors } from '../../ThemeContext'
+import { useResponsive } from '../../hooks/useResponsive'
 import type { ExecutionMode } from '../../types'
 
 const LEARN_PATTERN = /^学习\s+(.+)/
@@ -43,6 +44,7 @@ interface PendingMessage {
 
 export function ChatInput() {
   const c = useColors()
+  const { isMobile } = useResponsive()
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [pendingQueue, setPendingQueue] = useState<PendingMessage[]>([])
@@ -261,21 +263,23 @@ export function ChatInput() {
   return (
     <Box
       sx={{
-        px: 2,
-        py: 1,
+        px: isMobile ? 1.5 : 2,
+        py: isMobile ? 1.25 : 1,
         display: 'flex',
         flexDirection: 'column',
         gap: 0.5,
         borderTop: `1px solid ${c.border}`,
         background: c.bgPanel,
         flexShrink: 0,
+        // 移动端安全区域
+        pb: isMobile ? 'calc(1.25rem + env(safe-area-inset-bottom, 0))' : 1,
       }}
     >
       {/* 后端队列提示 */}
       {queue.length > 0 && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-          <QueueIcon sx={{ fontSize: 13, color: c.warning }} />
-          <Typography sx={{ fontSize: 11, color: c.textMuted }}>
+          <QueueIcon sx={{ fontSize: isMobile ? 12 : 13, color: c.warning }} />
+          <Typography sx={{ fontSize: isMobile ? 10 : 11, color: c.textMuted }}>
             后端 {queue.length} 个任务排队中
           </Typography>
         </Box>
@@ -360,20 +364,22 @@ export function ChatInput() {
       )}
 
       {/* 输入行 */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-        {/* 模式选择器 */}
-        <Tooltip title={currentModeConfig.label}>
-          <IconButton
-            size="small"
-            onClick={(e) => setModeMenuAnchor(e.currentTarget)}
-            sx={{
-              color: currentModeConfig.color,
-              '&:hover': { bgcolor: `${currentModeConfig.color}15` },
-            }}
-          >
-            {currentModeConfig.icon}
-          </IconButton>
-        </Tooltip>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: isMobile ? 0.5 : 0.75 }}>
+        {/* 模式选择器 - 移动端隐藏，合并到菜单 */}
+        {!isMobile && (
+          <Tooltip title={currentModeConfig.label}>
+            <IconButton
+              size="small"
+              onClick={(e) => setModeMenuAnchor(e.currentTarget)}
+              sx={{
+                color: currentModeConfig.color,
+                '&:hover': { bgcolor: `${currentModeConfig.color}15` },
+              }}
+            >
+              {currentModeConfig.icon}
+            </IconButton>
+          </Tooltip>
+        )}
         <Menu
           anchorEl={modeMenuAnchor}
           open={Boolean(modeMenuAnchor)}
@@ -442,7 +448,7 @@ export function ChatInput() {
             '&:focus-within': {
               borderColor: buttonMode === 'queue' ? c.warning : isLearnCommand ? c.success : c.primary,
             },
-            px: 1.5,
+            px: isMobile ? 1.25 : 1.5,
           }}
         >
           <InputBase
@@ -454,9 +460,9 @@ export function ChatInput() {
             placeholder={busy ? '输入后排队执行...' : '输入任务... 或「学习 主题名」'}
             fullWidth
             sx={{
-              fontSize: 14,
+              fontSize: isMobile ? 16 : 14, // iOS 需要 16px 防止缩放
               color: c.text,
-              py: '8px',
+              py: isMobile ? '10px' : '8px',
               '& .MuiInputBase-input::placeholder': { color: c.textMuted, opacity: 1 },
             }}
           />
@@ -475,9 +481,9 @@ export function ChatInput() {
               disabled={btn.disabled}
               size="small"
               sx={{
-                width: 36,
-                height: 36,
-                borderRadius: '8px',
+                width: isMobile ? 42 : 36,
+                height: isMobile ? 42 : 36,
+                borderRadius: isMobile ? '10px' : '8px',
                 bgcolor: btn.color,
                 color: '#fff',
                 flexShrink: 0,

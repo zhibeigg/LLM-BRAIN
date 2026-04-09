@@ -7,7 +7,11 @@ import { initDefaultMappings } from './db/difficulty-mapping.js'
 import { apiRouter } from './api/index.js'
 import { authRouter } from './api/auth.js'
 import { authMiddleware } from './middleware/auth.js'
+import { errorHandler, notFoundHandler, registerGlobalErrorHandlers } from './middleware/errorHandler.js'
 import { initWebSocket } from './ws/server.js'
+
+// 注册全局错误监听
+registerGlobalErrorHandlers()
 
 const app = express()
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3715
@@ -39,6 +43,12 @@ app.use('/api/auth', authRouter)
 
 // 需要认证的 API 路由
 app.use('/api', authMiddleware, apiRouter)
+
+// 404 处理（必须在所有路由之后）
+app.use(notFoundHandler)
+
+// 全局错误处理（必须在 404 之后）
+app.use(errorHandler)
 
 // 创建 HTTP server 并初始化 WebSocket
 const server = createServer(app)

@@ -1,0 +1,24 @@
+{
+  "name": "LLM Brain",
+  "short_name": "LLMBrain",
+  "description": "AI大模型知识库管理系统",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1976d2",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "pwa-192x192.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "pwa-512x512.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

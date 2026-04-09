@@ -48,6 +48,15 @@
     },
     "dialog": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://releases.llm-brain.com/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "YOUR_ED25519_PUBLIC_KEY_HERE",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

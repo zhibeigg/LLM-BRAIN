@@ -1,8 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+
+// 导入增强动画系统
+import './styles/animations.css'
 import { Box, Typography, IconButton, Tooltip, CircularProgress, Button } from '@mui/material'
 import {
   Settings as SettingsIcon, Logout as LogoutIcon,
   Psychology as BrainIcon, Add as AddIcon,
+  Menu as MenuIcon,
 } from '@mui/icons-material'
 import { GraphCanvas } from './components/graph'
 import { PersonalityPanel } from './components/personality'
@@ -13,12 +17,15 @@ import { SettingsDialog } from './components/settings'
 import { ExportImport } from './components/graph/ExportImport'
 import { BrainSelector } from './components/brain'
 import { LoginPage } from './components/auth'
+import { PWAInstallPrompt, OfflinePage } from './components/pwa'
+import { MobileNav } from './components/mobile/MobileNav'
 import { useGraphStore } from './stores/graphStore'
 import { useAuthStore } from './stores/authStore'
 import { useBrainStore } from './stores/brainStore'
 import { useTaskStore } from './stores/taskStore'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useColors } from './ThemeContext'
+import { useResponsive } from './hooks/useResponsive'
 
 /** 可拖拽分割线 */
 function DragHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
@@ -121,9 +128,12 @@ function NoBrainGuide({ onOpenCreate }: { onOpenCreate: () => void }) {
   )
 }
 
+type MobileTab = 'chat' | 'graph' | 'personality'
+
 function MainApp() {
   useWebSocket()
   const c = useColors()
+  const { isMobile } = useResponsive()
 
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const user = useAuthStore((s) => s.user)
@@ -133,6 +143,10 @@ function MainApp() {
   const brainsLoading = useBrainStore((s) => s.loading)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createCount, setCreateCount] = useState(0)
+
+  // 移动端状态
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
 
   const [leftWidth, setLeftWidth] = useState(LEFT_WIDTH)
   const [graphWidth, setGraphWidth] = useState(480)
@@ -150,6 +164,169 @@ function MainApp() {
     setGraphWidth(prev => Math.max(GRAPH_MIN, prev - delta))
   }, [])
 
+  // 移动端 Tab 切换
+  const handleMobileTabChange = useCallback((tab: MobileTab) => {
+    setMobileTab(tab)
+  }, [])
+
+  // 离线状态检测和显示
+  const [showOfflinePage, setShowOfflinePage] = useState(false)
+  useEffect(() => {
+    // 初始检查
+    if (!navigator.onLine) {
+      setShowOfflinePage(true)
+    }
+
+    const handleOffline = () => setShowOfflinePage(true)
+    const handleOnline = () => setShowOfflinePage(false)
+
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', handleOnline)
+
+    return () => {
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [])
+
+  if (showOfflinePage) {
+    return <OfflinePage />
+  }
+
+  // 移动端布局
+  if (isMobile) {
+    return (
+      <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
+        {/* 移动端顶部栏 */}
+        <Box
+          sx={{
+            height: 48,
+            px: 1.5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderBottom: `1px solid ${c.border}`,
+            background: c.bgPanel,
+            flexShrink: 0,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <IconButton
+              size="small"
+              onClick={() => setMobileNavOpen(true)}
+              sx={{ color: c.textMuted, mr: 0.5 }}
+            >
+              <MenuIcon sx={{ fontSize: 22 }} />
+            </IconButton>
+            <Box
+              sx={{
+                width: 8, height: 8, borderRadius: '50%',
+                bgcolor: c.primary, boxShadow: `0 0 8px ${c.primary}60`,
+              }}
+            />
+            <Typography
+              sx={{
+                fontWeight: 800, fontSize: 15, color: c.text,
+                letterSpacing: '-0.03em',
+              }}
+            >
+              LLM-BRAIN
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {user && (
+              <Typography sx={{ color: c.textSecondary, fontSize: 12 }}>
+                {user.username}
+              </Typography>
+            )}
+            <IconButton
+              size="small"
+              onClick={() => setSettingsOpen(true)}
+              sx={{ color: c.textMuted }}
+            >
+              <SettingsIcon sx={{ fontSize: 20 }} />
+            </IconButton>
+          </Box>
+        </Box>
+
+        {/* 移动端内容区 */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* 无大脑时显示引导页 */}
+          {!currentBrainId && !brainsLoading ? (
+            <NoBrainGuide onOpenCreate={() => setCreateCount(c => c + 1)} />
+          ) : (
+            <>
+              {/* 移动端 Tab 内容 */}
+              <Box sx={{ flex: 1, display: mobileTab === 'chat' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+                <Box sx={{ flex: 1, overflowY: 'auto' }}>
+                  <ThinkingPanel />
+                </Box>
+                <ChatInput />
+              </Box>
+
+              <Box sx={{ flex: 1, display: mobileTab === 'graph' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+                <GraphCanvas />
+              </Box>
+
+              <Box sx={{ flex: 1, display: mobileTab === 'personality' ? 'flex' : 'none', flexDirection: 'column', overflow: 'auto' }}>
+                <PersonalityPanel />
+              </Box>
+
+              {/* 移动端底部 Tab 栏 */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  borderTop: `1px solid ${c.border}`,
+                  background: c.bgPanel,
+                  flexShrink: 0,
+                  pb: 'env(safe-area-inset-bottom, 0)',
+                }}
+              >
+                <MobileTabButton
+                  active={mobileTab === 'chat'}
+                  onClick={() => handleMobileTabChange('chat')}
+                  icon={<ChatIcon />}
+                  label="对话"
+                  color={c}
+                />
+                <MobileTabButton
+                  active={mobileTab === 'graph'}
+                  onClick={() => handleMobileTabChange('graph')}
+                  icon={<GraphIcon />}
+                  label="图谱"
+                  color={c}
+                />
+                {currentBrainId && (
+                  <MobileTabButton
+                    active={mobileTab === 'personality'}
+                    onClick={() => handleMobileTabChange('personality')}
+                    icon={<PersonalityIcon />}
+                    label="性格"
+                    color={c}
+                  />
+                )}
+              </Box>
+            </>
+          )}
+        </Box>
+
+        {/* 移动端导航抽屉 */}
+        <MobileNav
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          activeTab={mobileTab}
+          onTabChange={handleMobileTabChange}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onLogout={logout}
+        />
+
+        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <PWAInstallPrompt />
+      </Box>
+    )
+  }
+
+  // 桌面端布局
   return (
     <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
       {/* 顶部工具栏 */}
@@ -286,7 +463,84 @@ function MainApp() {
       </Box>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* PWA 安装提示 */}
+      <PWAInstallPrompt />
     </Box>
+  )
+}
+
+// 移动端 Tab 按钮组件
+function MobileTabButton({
+  active,
+  onClick,
+  icon,
+  label,
+  color,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  color: ReturnType<typeof useColors>
+}) {
+  return (
+    <Box
+      onClick={onClick}
+      sx={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        py: 1,
+        gap: 0.25,
+        cursor: 'pointer',
+        color: active ? color.primary : color.textMuted,
+        bgcolor: active ? `${color.primary}10` : 'transparent',
+        transition: 'all 0.2s ease',
+        '&:active': {
+          bgcolor: `${color.primary}20`,
+        },
+      }}
+    >
+      {icon}
+      <Typography sx={{ fontSize: 10, fontWeight: active ? 600 : 400 }}>
+        {label}
+      </Typography>
+    </Box>
+  )
+}
+
+// 移动端 Tab 图标组件
+function ChatIcon({ sx }: { sx?: object }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} {...(sx as object)}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
+function GraphIcon({ sx }: { sx?: object }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} {...(sx as object)}>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="18" r="3" />
+      <line x1="8.5" y1="8.5" x2="15.5" y2="15.5" />
+      <line x1="15.5" y1="8.5" x2="8.5" y2="15.5" />
+    </svg>
+  )
+}
+
+function PersonalityIcon({ sx }: { sx?: object }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} {...(sx as object)}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+      <line x1="9" y1="9" x2="9.01" y2="9" />
+      <line x1="15" y1="9" x2="15.01" y2="9" />
+    </svg>
   )
 }
 

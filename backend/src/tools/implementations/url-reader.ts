@@ -1,4 +1,5 @@
 import type { ToolResult, ToolContext } from '../../types/index.js'
+import { isSafeURL } from '../../utils/network.js'
 
 /**
  * 网页读取工具 — fetch URL 并提取纯文本
@@ -10,6 +11,45 @@ export async function executeUrlReader(
   try {
     const { url } = args
     if (!url) return { success: false, output: '', error: '缺少 URL' }
+
+    // URL长度限制
+    const MAX_URL_LENGTH = 2048
+    if (url.length > MAX_URL_LENGTH) {
+      return { success: false, output: '', error: `URL 长度超过限制（最多 ${MAX_URL_LENGTH} 字符）` }
+    }
+
+    // 协议检查（只允许 http/https）
+    try {
+      const urlObj = new URL(url)
+      if (!['http:', 'https:'].includes(urlObj.protocol)) {
+        return { success: false, output: '', error: `禁止访问: 不支持的协议 ${urlObj.protocol}（仅允许 http/https）` }
+      }
+    } catch {
+      return { success: false, output: '', error: '禁止访问: 无效的 URL 格式' }
+    }
+
+    // URL 安全检查（防止 SSRF）
+    const safety = isSafeURL(url)
+    if (!safety.safe) {
+      return { success: false, output: '', error: '禁止访问: ' + safety.reason }
+    }
+
+    // 恶意域名黑名单检查
+    const maliciousDomains = [
+      'localhost',
+      '127.0.0.1',
+      '0.0.0.0',
+      '::1',
+    ]
+    try {
+      const urlObj = new URL(url)
+      const hostname = urlObj.hostname.toLowerCase()
+      if (maliciousDomains.includes(hostname)) {
+        return { success: false, output: '', error: '禁止访问: 恶意或危险域名' }
+      }
+    } catch {
+      // 已在上面处理过无效URL
+    }
 
     const maxLength = args.maxLength ?? 5000
 

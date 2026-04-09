@@ -9,6 +9,113 @@ html, body, #root {
   font-family: 'Inter', 'Noto Sans SC', sans-serif;
 }
 
+/* ========== 响应式断点 ========== */
+/* 移动端: < 768px */
+/* 平板: 768px - 1024px */
+/* 桌面: > 1024px */
+
+/* 移动端适配 */
+@media (max-width: 767px) {
+  html {
+    font-size: 14px;
+  }
+
+  /* 优化触摸滚动 */
+  * {
+    -webkit-overflow-scrolling: touch;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 禁用桌面端 hover 效果 */
+  .no-touch-hover:hover {
+    background-color: inherit !important;
+  }
+}
+
+/* 平板适配 */
+@media (min-width: 768px) and (max-width: 1024px) {
+  html {
+    font-size: 15px;
+  }
+}
+
+/* 桌面端 */
+@media (min-width: 1025px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+/* 隐藏桌面滚动条（移动端显示） */
+.mobile-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.mobile-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* 移动端抽屉动画 */
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutLeft {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+.mobile-drawer-enter {
+  animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.mobile-drawer-exit {
+  animation: slideOutLeft 0.25s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* 触摸反馈 */
+@media (max-width: 767px) {
+  .touch-feedback {
+    transition: transform 0.1s ease;
+  }
+
+  .touch-feedback:active {
+    transform: scale(0.97);
+  }
+
+  /* 增大触摸目标 */
+  .MuiIconButton-sizeSmall {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  /* 优化输入框 */
+  .MuiInputBase-input {
+    font-size: 16px !important; /* 防止 iOS 缩放 */
+  }
+}
+
+/* 移动端底部安全区 */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .mobile-safe-area {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* 彻底杀掉 MUI dark mode 的 elevation overlay */
 * {
   --Paper-overlay: none !important;
