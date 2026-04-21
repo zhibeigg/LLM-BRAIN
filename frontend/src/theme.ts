@@ -34,7 +34,7 @@ export const enhancedDarkColors = {
   // 文本颜色（优化对比度）
   text: '#E4E4E8',           // 主文本（原本 #BCBEC4 → 提升至 #E4E4E8）
   textSecondary: '#A8A8B0', // 次要文本（原本 #AAACB2 → 提升至 #A8A8B0）
-  textMuted: '#6E6E78',     // 注释灰（原本 #7A7E85 → 提升至 #6E6E78）
+  textMuted: '#8A8A94',     // 注释灰（提升对比度至 ~5.0:1，满足 WCAG AA）
   textInverse: '#0D0D0F',   // 反色文本
 
   // 状态色
@@ -56,6 +56,24 @@ export const enhancedDarkColors = {
   shadow: '#00000066',     // 阴影色（40% 透明度）
   glow: '#5B8DEF33',       // 发光效果（20% 透明度）
   glowStrong: '#5B8DEF66', // 强发光效果（40% 透明度）
+
+  // 语义色 — 步骤类型
+  stepLeader: '#A78BFA',     // Leader 思考/决策
+  stepAgent: '#4ADE80',      // Agent 输出
+  stepBoss: '#FBBF24',       // Boss 评审
+  stepLearn: '#C084FC',      // 知识学习
+  stepTool: '#F59E0B',       // 工具调用
+
+  // 语义色 — 难度
+  diffEasy: '#4ADE80',       // 低难度（绿）
+  diffMedium: '#FBBF24',     // 中难度（黄）
+  diffHard: '#EF4444',       // 高难度（红）
+
+  // 语义色 — 工具类别
+  toolSearch: '#5B8DEF',     // 搜索类
+  toolCode: '#4ADE80',       // 代码类
+  toolMemory: '#C084FC',     // 记忆类
+  toolUtility: '#F59E0B',    // 工具类
 }
 
 // ============================================================
@@ -112,13 +130,31 @@ export const enhancedLightColors = {
   shadow: '#0000001A',     // 阴影色（10% 透明度）
   glow: '#2563EB20',       // 发光效果
   glowStrong: '#2563EB40', // 强发光效果
+
+  // 语义色 — 步骤类型
+  stepLeader: '#7C3AED',
+  stepAgent: '#16A34A',
+  stepBoss: '#D97706',
+  stepLearn: '#9333EA',
+  stepTool: '#D97706',
+
+  // 语义色 — 难度
+  diffEasy: '#16A34A',
+  diffMedium: '#D97706',
+  diffHard: '#DC2626',
+
+  // 语义色 — 工具类别
+  toolSearch: '#2563EB',
+  toolCode: '#16A34A',
+  toolMemory: '#9333EA',
+  toolUtility: '#D97706',
 }
 
 // ============================================================
 // 旧版颜色（保持向后兼容）
 // ============================================================
 
-// 深色主题色板 — JetBrains Islands Dark
+// @deprecated 使用 enhancedDarkColors 代替
 export const darkColors = {
   bg: '#101012',
   bgPanel: '#1E1F22',
@@ -140,7 +176,7 @@ export const darkColors = {
   warning: '#F2C55C',
 }
 
-// 浅色主题色板 — Apple HIG 白色风格
+// @deprecated 使用 enhancedLightColors 代替
 export const lightColors = {
   bg: '#F5F5F7',
   bgPanel: '#FFFFFF',
@@ -162,7 +198,7 @@ export const lightColors = {
   warning: '#FF9500',
 }
 
-export type AppColors = typeof darkColors
+export type AppColors = typeof enhancedDarkColors
 export type EnhancedColors = typeof enhancedDarkColors
 
 // ============================================================
@@ -170,80 +206,11 @@ export type EnhancedColors = typeof enhancedDarkColors
 // ============================================================
 
 export function getColors(mode: ColorMode): AppColors {
-  return mode === 'dark' ? darkColors : lightColors
+  return mode === 'dark' ? enhancedDarkColors : enhancedLightColors
 }
 
 export function getEnhancedColors(mode: ColorMode): EnhancedColors {
   return mode === 'dark' ? enhancedDarkColors : enhancedLightColors
-}
-
-// ============================================================
-// CSS 变量注入
-// ============================================================
-
-export function injectCSSVariables(mode: ColorMode): void {
-  const colors = getEnhancedColors(mode)
-  const root = document.documentElement
-
-  // 背景层次
-  root.style.setProperty('--bg', colors.bg)
-  root.style.setProperty('--bg-panel', colors.bgPanel)
-  root.style.setProperty('--bg-card', colors.bgCard)
-  root.style.setProperty('--bg-input', colors.bgInput)
-  root.style.setProperty('--bg-hover', colors.bgHover)
-  root.style.setProperty('--bg-active', colors.bgActive)
-  root.style.setProperty('--bg-overlay', colors.bgOverlay)
-
-  // 边框层次
-  root.style.setProperty('--border', colors.border)
-  root.style.setProperty('--border-light', colors.borderLight)
-  root.style.setProperty('--border-accent', colors.borderAccent)
-
-  // 主色系
-  root.style.setProperty('--primary', colors.primary)
-  root.style.setProperty('--primary-light', colors.primaryLight)
-  root.style.setProperty('--primary-dark', colors.primaryDark)
-  root.style.setProperty('--primary-glow', colors.primaryGlow)
-
-  // 强调色
-  root.style.setProperty('--secondary', colors.secondary)
-  root.style.setProperty('--secondary-light', colors.secondaryLight)
-
-  // 文本颜色
-  root.style.setProperty('--text', colors.text)
-  root.style.setProperty('--text-secondary', colors.textSecondary)
-  root.style.setProperty('--text-muted', colors.textMuted)
-  root.style.setProperty('--text-inverse', colors.textInverse)
-
-  // 状态色
-  root.style.setProperty('--success', colors.success)
-  root.style.setProperty('--success-light', colors.successLight)
-  root.style.setProperty('--error', colors.error)
-  root.style.setProperty('--error-light', colors.errorLight)
-  root.style.setProperty('--warning', colors.warning)
-  root.style.setProperty('--warning-light', colors.warningLight)
-  root.style.setProperty('--info', colors.info)
-  root.style.setProperty('--info-light', colors.infoLight)
-
-  // 特殊效果
-  root.style.setProperty('--overlay', colors.overlay)
-  root.style.setProperty('--shadow', colors.shadow)
-  root.style.setProperty('--glow', colors.glow)
-  root.style.setProperty('--glow-strong', colors.glowStrong)
-
-  // 当前颜色模式标识
-  root.style.setProperty('--color-mode', mode)
-
-  // 动画相关变量
-  root.style.setProperty('--animation-duration-fast', '0.15s')
-  root.style.setProperty('--animation-duration-normal', '0.3s')
-  root.style.setProperty('--animation-duration-slow', '0.5s')
-  root.style.setProperty('--animation-duration-slower', '0.8s')
-  root.style.setProperty('--ease-out-expo', 'cubic-bezier(0.16, 1, 0.3, 1)')
-  root.style.setProperty('--ease-out-back', 'cubic-bezier(0.34, 1.56, 0.64, 1)')
-  root.style.setProperty('--ease-spring', 'cubic-bezier(0.22, 1, 0.36, 1)')
-  root.style.setProperty('--pulse-glow-color', colors.primary)
-  root.style.setProperty('--pulse-glow-spread', '20px')
 }
 
 // ============================================================
@@ -662,3 +629,12 @@ export const theme = createAppTheme('dark')
 // 增强版主题导出
 export const enhancedDarkTheme = createAppTheme('dark')
 export const enhancedLightTheme = createAppTheme('light')
+
+/** z-index 层级常量 */
+export const zIndex = {
+  timeline: 1,        // 时间线圆点
+  scrollMask: 2,      // 滚动渐变遮罩
+  dragHandle: 5,      // 拖拽分割线
+  floatingPanel: 10,  // 浮动面板（节点编辑器、边信息面板）
+  pwaPrompt: 100,     // PWA 安装提示
+} as const

@@ -62,7 +62,7 @@ function MemoryNodeComponentInner(props: NodeProps) {
     if (highlighted) return `${NEW_NODE_COLOR}18`
     if (active) return colors.bg
     if (selected) return `${colors.accent}10`
-    return `${c.bgCard}cc`
+    return c.bgCard
   }, [highlighted, active, selected, colors, c.bgCard])
 
   const handleStyle: React.CSSProperties = useMemo(() => ({
@@ -72,14 +72,14 @@ function MemoryNodeComponentInner(props: NodeProps) {
     border: `1.5px solid ${c.bgPanel}`,
   }), [c.textMuted, c.bgPanel])
 
-  // 计算阴影强度
+  // 计算阴影
   const shadowIntensity = useMemo(() => {
-    if (highlighted) return '0 0 0 3px rgba(34, 197, 94, 0.35), 0 8px 32px rgba(0,0,0,0.4), 0 0 20px rgba(34, 197, 94, 0.2)'
-    if (active) return '0 0 0 3px rgba(99, 102, 241, 0.3), 0 8px 24px rgba(0,0,0,0.35), 0 0 16px rgba(99, 102, 241, 0.15)'
-    if (selected) return '0 0 0 2.5px rgba(168, 85, 247, 0.4), 0 6px 20px rgba(0,0,0,0.3), 0 0 12px rgba(168, 85, 247, 0.2)'
-    if (isHovered) return '0 4px 16px rgba(0,0,0,0.25), 0 0 8px rgba(99, 102, 241, 0.1)'
-    return '0 2px 8px rgba(0,0,0,0.2)'
-  }, [highlighted, active, selected, isHovered])
+    if (highlighted) return `0 0 0 2px ${c.success}`
+    if (active) return `0 0 0 2px ${colors.accent}`
+    if (selected) return `0 0 0 2px ${c.primary}`
+    if (isHovered) return `0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px ${colors.accent}`
+    return `0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px ${c.border}`
+  }, [highlighted, active, selected, isHovered, c, colors])
 
   // 悬停时的Y轴偏移
   const hoverTransform = isHovered && !highlighted ? 'translateY(-3px)' : 'translateY(0)'
@@ -93,26 +93,15 @@ function MemoryNodeComponentInner(props: NodeProps) {
         minWidth: 160,
         maxWidth: 240,
         borderRadius: '12px',
-        background: `linear-gradient(135deg, ${bgColor}, ${bgColor}aa)`,
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        border: `1.5px solid ${borderColor}`,
+        background: bgColor,
+        border: highlighted ? `2px solid ${c.success}` : `1.5px solid ${borderColor}`,
         padding: '10px 12px',
         boxShadow: shadowIntensity,
         transform: hoverTransform,
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         cursor: 'grab',
-        animation: highlighted ? 'newNodePulse 1.5s ease-in-out infinite' : 'none',
-        '@keyframes newNodePulse': {
-          '0%, 100%': { 
-            boxShadow: `0 0 0 3px rgba(34, 197, 94, 0.25), 0 8px 32px rgba(0,0,0,0.4), 0 0 20px rgba(34, 197, 94, 0.2)`,
-          },
-          '50%': { 
-            boxShadow: `0 0 0 6px rgba(34, 197, 94, 0.15), 0 8px 32px rgba(0,0,0,0.5), 0 0 30px rgba(34, 197, 94, 0.3)`,
-          },
-        },
         '&:hover': {
-          boxShadow: '0 8px 24px rgba(0,0,0,0.35), 0 0 12px rgba(99, 102, 241, 0.15)',
+          boxShadow: `0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px ${borderColor}`,
         },
       }}
     >
@@ -130,12 +119,7 @@ function MemoryNodeComponentInner(props: NodeProps) {
             : selected
               ? `linear-gradient(180deg, ${colors.accent}, ${colors.accent}80)`
               : `linear-gradient(180deg, ${colors.accent}dd, ${colors.accent}60)`,
-          boxShadow: highlighted 
-            ? `0 0 8px ${NEW_NODE_COLOR}60`
-            : selected
-              ? `0 0 8px ${colors.accent}50`
-              : 'none',
-          transition: 'all 0.3s ease',
+          transition: 'background 0.3s ease',
         }}
       />
 
@@ -153,7 +137,7 @@ function MemoryNodeComponentInner(props: NodeProps) {
             : selected
               ? `${colors.accent}60`
               : `${c.textMuted}30`,
-          transition: 'all 0.3s ease',
+          transition: 'background 0.3s ease',
         }}
       />
 
@@ -183,6 +167,7 @@ function MemoryNodeComponentInner(props: NodeProps) {
             transition: 'all 0.2s ease',
             padding: 0,
           }}
+          aria-label="关闭提示"
         >
           <CloseIcon sx={{ fontSize: 14 }} />
         </IconButton>
@@ -197,20 +182,14 @@ function MemoryNodeComponentInner(props: NodeProps) {
           fontSize: 11,
           fontWeight: 700,
           color: highlighted ? NEW_NODE_COLOR : selected ? colors.accent : c.textMuted,
-          bgcolor: `${c.bgCard}e6`,
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
+          bgcolor: c.bgCard,
           border: `1px solid ${highlighted ? `${NEW_NODE_COLOR}40` : selected ? `${colors.accent}40` : `${c.border}60`}`,
           borderRadius: '5px',
           px: 0.7,
           py: 0.2,
           lineHeight: '14px',
-          boxShadow: highlighted 
-            ? `0 0 8px ${NEW_NODE_COLOR}30`
-            : selected
-              ? `0 0 8px ${colors.accent}25`
-              : 'none',
-          transition: 'all 0.3s ease',
+          boxShadow: 'none',
+          transition: 'color 0.3s ease, border-color 0.3s ease',
         }}
       >
         {Math.round(data.confidence * 100)}%
@@ -262,7 +241,7 @@ function MemoryNodeComponentInner(props: NodeProps) {
                 bgcolor: selected ? `${colors.accent}12` : c.bgInput,
                 border: `1px solid ${selected ? `${colors.accent}40` : c.border}`,
                 '& .MuiChip-label': { px: 0.7 },
-                transition: 'all 0.3s ease',
+                transition: 'color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease',
                 '&:hover': {
                   bgcolor: `${colors.accent}18`,
                   borderColor: `${colors.accent}60`,

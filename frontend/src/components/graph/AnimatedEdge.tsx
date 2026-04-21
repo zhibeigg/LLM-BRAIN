@@ -92,7 +92,7 @@ function AnimatedEdgeInner(props: EdgeProps) {
               </feMerge>
             </filter>
           </defs>
-          <circle r="4" fill="#E8613A" filter={`url(#glow-${id})`}>
+          <circle r="4" fill="#5B8DEF" filter={`url(#glow-${id})`}>
             <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
           </circle>
           <circle r="2.5" fill="#FFFFFF" opacity="0.9">

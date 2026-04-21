@@ -49,27 +49,27 @@ const STEP_CONFIG = {
 
 /** 步骤卡片内部颜色（跟随主题） */
 function useStepTheme() {
+  const c = useColors()
   const { mode } = useThemeMode()
   const isDark = mode === 'dark'
   return {
-    // Islands Dark 用冷灰 + 蓝色高亮，Apple 用纯净灰
-    bodyText: isDark ? '#BCBEC4' : '#3C3C43',
-    mutedText: isDark ? '#AAACB2' : '#8E8E93',
-    dimText: isDark ? '#7A7E85' : '#AEAEB2',
+    bodyText: c.text,
+    mutedText: c.textSecondary,
+    dimText: c.textMuted,
     filteredText: isDark ? '#4B5059' : '#C7C7CC',
     brightText: isDark ? '#D1D3DA' : '#1D1D1F',
-    agentText: isDark ? '#6AAB73' : '#248A3D',
-    chipBg: isDark ? '#101012' : '#F0F0F2',
-    chipBorder: isDark ? '#2C2D31' : '#D1D1D6',
-    filteredChipBg: isDark ? '#1E1F22' : '#E8E8ED',
-    cardBg: isDark ? '#101012' : '#FFFFFF',
+    agentText: c.success,
+    chipBg: c.bg,
+    chipBorder: c.border,
+    filteredChipBg: c.bgPanel,
+    cardBg: c.bg,
     cardAgentBg: isDark ? '#0E0F10' : '#F5FFF5',
-    cardHeaderBg: isDark ? '#1E1F22' : '#F5F5F7',
+    cardHeaderBg: c.bgPanel,
     cardHeaderAgentBg: isDark ? '#1A1C1A' : '#F0F5F0',
-    cardHeaderHover: isDark ? '#2B2D30' : '#E8E8ED',
+    cardHeaderHover: c.bgHover,
     cardHeaderAgentHover: isDark ? '#252825' : '#E5EDE5',
-    historyBg: isDark ? '#101012' : '#F5F5F7',
-    historyHover: isDark ? '#1E1F22' : '#E8E8ED',
+    historyBg: c.bg,
+    historyHover: c.bgPanel,
     progressBg: isDark ? '#3A3D41' : '#D1D1D6',
   }
 }
@@ -290,7 +290,11 @@ function TraceDetail({ trace }: { trace?: LLMTrace }) {
   return (
     <Box sx={{ mt: 1 }}>
       <Box
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
+        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!open) } }}
         sx={{
           display: 'flex', alignItems: 'center', gap: 0.5,
           cursor: 'pointer', userSelect: 'none',
@@ -655,7 +659,11 @@ function PathChoiceCard({
           {(stepData.thinking || decisionData?.reason) && (
             <Box sx={{ mt: 1 }}>
               <Box
+                role="button"
+                tabIndex={0}
+                aria-expanded={thinkingOpen}
                 onClick={() => setThinkingOpen(!thinkingOpen)}
+                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setThinkingOpen(!thinkingOpen) } }}
                 sx={{
                   display: 'flex', alignItems: 'center', gap: 0.5,
                   cursor: 'pointer', userSelect: 'none',
@@ -869,7 +877,11 @@ function StepCard({
           }}
         />
         <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
+          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '8px 14px 8px 16px', cursor: 'pointer',
@@ -952,6 +964,7 @@ function SessionItem({
           size="small"
           onClick={(e) => { e.stopPropagation(); onDelete() }}
           sx={{ p: 0.25, color: c.textMuted, opacity: 0, '.MuiBox-root:hover > &': { opacity: 1 }, '&:hover': { color: c.error } }}
+          aria-label="删除会话"
         >
           <DeleteIcon sx={{ fontSize: 14 }} />
         </IconButton>
@@ -1060,7 +1073,11 @@ function PromptCard({ prompt, isHistory }: { prompt: string; isHistory: boolean 
       }}
     >
       <Box
+        role="button"
+        tabIndex={isLong ? 0 : undefined}
+        aria-expanded={isLong ? expanded : undefined}
         onClick={() => isLong && setExpanded(!expanded)}
+        onKeyDown={isLong ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } } : undefined}
         sx={{
           display: 'flex', alignItems: 'center', gap: 1,
           px: 2, py: 1.25,
@@ -1188,7 +1205,7 @@ export function ThinkingPanel() {
         {isViewingHistory ? (
           <>
             <Tooltip title="返回当前">
-              <IconButton size="small" onClick={() => viewSession(null)} sx={{ p: 0.25, color: c.textSecondary, '&:hover': { color: c.primary } }}>
+              <IconButton size="small" onClick={() => viewSession(null)} sx={{ p: 0.25, color: c.textSecondary, '&:hover': { color: c.primary } }} aria-label="返回当前">
                 <BackIcon sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
@@ -1220,6 +1237,7 @@ export function ThinkingPanel() {
                 bgcolor: historyOpen ? `${c.primary}10` : 'transparent',
                 '&:hover': { color: c.primary, bgcolor: `${c.primary}15` },
               }}
+              aria-label={historyOpen ? '收起历史' : '展开历史'}
             >
               <HistoryIcon sx={{ fontSize: 18 }} />
             </IconButton>
@@ -1299,6 +1317,7 @@ export function ThinkingPanel() {
                 size="small"
                 onClick={() => removeFromQueue(item.id)}
                 sx={{ p: 0.25, color: c.textMuted, '&:hover': { color: c.error } }}
+                aria-label="移除"
               >
                 <CloseIcon sx={{ fontSize: 14 }} />
               </IconButton>

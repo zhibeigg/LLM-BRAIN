@@ -309,7 +309,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <Typography variant="h6" sx={{ fontWeight: 600, color: c.text }}>系统设置</Typography>
-          <IconButton onClick={onClose} size="small" sx={{ color: c.textMuted }}><CloseIcon /></IconButton>
+          <IconButton onClick={onClose} size="small" sx={{ color: c.textMuted }} aria-label="关闭设置"><CloseIcon /></IconButton>
         </DialogTitle>
 
         <DialogContent sx={{ p: 0 }}>
@@ -550,13 +550,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                         />
                         <ListItemSecondaryAction>
                           <IconButton size="small" onClick={() => handleDetectProviderModels(provider.id)}
-                            disabled={detecting === provider.id} sx={{ color: c.primary }} title="自动检测模型">
+                            disabled={detecting === provider.id} sx={{ color: c.primary }} title="自动检测模型" aria-label="自动检测模型">
                             {detecting === provider.id ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
                           </IconButton>
-                          <IconButton size="small" onClick={() => handleEditProvider(provider)} sx={{ color: c.textMuted }}>
+                          <IconButton size="small" onClick={() => handleEditProvider(provider)} sx={{ color: c.textMuted }} aria-label="编辑提供商">
                             <EditIcon fontSize="small" />
                           </IconButton>
-                          <IconButton size="small" onClick={() => handleDeleteProvider(provider.id)} sx={{ color: c.error }}>
+                          <IconButton size="small" onClick={() => handleDeleteProvider(provider.id)} sx={{ color: c.error }} aria-label="删除提供商">
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </ListItemSecondaryAction>

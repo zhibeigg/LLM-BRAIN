@@ -6,6 +6,7 @@ import {
   ContentCopy as CopyIcon,
   Edit as EditIcon,
 } from '@mui/icons-material'
+import { useColors } from '../../ThemeContext'
 
 interface ContextMenuProps {
   open: boolean
@@ -30,6 +31,8 @@ export function ContextMenu({
   onDeleteEdge,
   onEditNode,
 }: ContextMenuProps) {
+  const c = useColors()
+
   const handleAddMemoryNode = () => {
     onAddNode('memory', position)
     onClose()
@@ -64,17 +67,17 @@ export function ContextMenu({
       slotProps={{
         paper: {
           sx: {
-            bgcolor: '#232438',
+            bgcolor: c.bgCard,
             borderRadius: '10px',
-            border: '1px solid #333458',
+            border: `1px solid ${c.border}`,
             boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
             minWidth: 200,
             '& .MuiMenuItem-root': {
               fontSize: 14,
               py: 0.75,
-              color: '#E8EAF6',
+              color: c.text,
               '&:hover': {
-                bgcolor: '#2f3050',
+                bgcolor: c.bgHover,
               },
             },
           },
@@ -93,26 +96,26 @@ export function ContextMenu({
       {targetType === 'node' && [
         <MenuItem key="edit" onClick={handleEditNode}>
           <ListItemIcon>
-            <EditIcon fontSize="small" sx={{ color: '#E8613A' }} />
+            <EditIcon fontSize="small" sx={{ color: c.primary }} />
           </ListItemIcon>
           <ListItemText>编辑节点</ListItemText>
         </MenuItem>,
         <MenuItem key="connect" onClick={handleEditNode}>
           <ListItemIcon>
-            <LinkIcon fontSize="small" sx={{ color: '#4ADE80' }} />
+            <LinkIcon fontSize="small" sx={{ color: c.success }} />
           </ListItemIcon>
           <ListItemText>添加连接</ListItemText>
         </MenuItem>,
-        <Divider key="divider" sx={{ borderColor: '#333458' }} />,
+        <Divider key="divider" sx={{ borderColor: c.border }} />,
         <MenuItem key="copy" onClick={handleEditNode}>
           <ListItemIcon>
-            <CopyIcon fontSize="small" sx={{ color: '#A0A3BD' }} />
+            <CopyIcon fontSize="small" sx={{ color: c.textSecondary }} />
           </ListItemIcon>
           <ListItemText>复制节点</ListItemText>
         </MenuItem>,
         <MenuItem key="delete" onClick={handleDeleteNode}>
           <ListItemIcon>
-            <DeleteIcon fontSize="small" sx={{ color: '#F87171' }} />
+            <DeleteIcon fontSize="small" sx={{ color: c.error }} />
           </ListItemIcon>
           <ListItemText>删除节点</ListItemText>
         </MenuItem>,
@@ -121,7 +124,7 @@ export function ContextMenu({
       {targetType === 'edge' && (
         <MenuItem onClick={handleDeleteEdge}>
           <ListItemIcon>
-            <DeleteIcon fontSize="small" sx={{ color: '#F87171' }} />
+            <DeleteIcon fontSize="small" sx={{ color: c.error }} />
           </ListItemIcon>
           <ListItemText>删除连接</ListItemText>
         </MenuItem>

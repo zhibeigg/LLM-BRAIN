@@ -85,7 +85,7 @@ export function MobileNav({
             LLM-BRAIN
           </Typography>
         </Box>
-        <IconButton size="small" onClick={onClose} sx={{ color: c.textMuted }}>
+        <IconButton size="small" onClick={onClose} sx={{ color: c.textMuted }} aria-label="关闭导航">
           <CloseIcon sx={{ fontSize: 20 }} />
         </IconButton>
       </Box>

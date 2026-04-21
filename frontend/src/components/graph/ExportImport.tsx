@@ -7,6 +7,7 @@ import {
 } from '@mui/icons-material'
 import { nodesApi, edgesApi } from '../../services/api'
 import { useGraphStore } from '../../stores/graphStore'
+import { useColors } from '../../ThemeContext'
 import type { MemoryNode, MemoryEdge } from '../../types'
 
 interface ExportData {
@@ -17,6 +18,7 @@ interface ExportData {
 }
 
 export function ExportImport() {
+  const c = useColors()
   const { nodes, edges, fetchGraph, autoLayout } = useGraphStore()
   const [layouting, setLayouting] = useState(false)
 
@@ -98,19 +100,20 @@ export function ExportImport() {
             size="small"
             onClick={handleAutoLayout}
             disabled={layouting}
-            sx={{ color: '#A0A3BD', '&:hover': { color: '#E8613A' } }}
+            sx={{ color: c.textMuted, '&:hover': { color: c.primary, bgcolor: `${c.primary}15` } }}
+            aria-label="自动规整布局"
           >
             {layouting ? <CircularProgress size={18} /> : <AutoLayoutIcon fontSize="small" />}
           </IconButton>
         </span>
       </Tooltip>
       <Tooltip title="导入图谱">
-        <IconButton size="small" onClick={handleImport} sx={{ color: '#A0A3BD', '&:hover': { color: '#E8613A' } }}>
+        <IconButton size="small" onClick={handleImport} sx={{ color: c.textMuted, '&:hover': { color: c.primary, bgcolor: `${c.primary}15` } }} aria-label="导入图谱">
           <ImportIcon fontSize="small" />
         </IconButton>
       </Tooltip>
       <Tooltip title="导出图谱">
-        <IconButton size="small" onClick={handleExport} sx={{ color: '#A0A3BD', '&:hover': { color: '#E8613A' } }}>
+        <IconButton size="small" onClick={handleExport} sx={{ color: c.textMuted, '&:hover': { color: c.primary, bgcolor: `${c.primary}15` } }} aria-label="导出图谱">
           <ExportIcon fontSize="small" />
         </IconButton>
       </Tooltip>

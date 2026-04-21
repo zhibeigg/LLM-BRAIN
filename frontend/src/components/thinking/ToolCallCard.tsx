@@ -10,7 +10,7 @@ import {
   ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material'
 import type { ToolCallPayload } from '../../types'
-import { useThemeMode } from '../../ThemeContext'
+import { useThemeMode, useColors } from '../../ThemeContext'
 
 /* ── 工具类别图标映射 ── */
 
@@ -36,26 +36,30 @@ const CATEGORY_ICON = {
   utility: BuildIcon,
 }
 
-const CATEGORY_COLOR = {
-  search: '#5B8DEF',
-  code: '#4ADE80',
-  memory: '#C084FC',
-  utility: '#F59E0B',
+function useCategoryColor() {
+  const c = useColors()
+  return {
+    search: c.toolSearch,
+    code: c.toolCode,
+    memory: c.toolMemory,
+    utility: c.toolUtility,
+  }
 }
 
 /* ── 主题 ── */
 
 function useCardTheme() {
+  const c = useColors()
   const { mode } = useThemeMode()
   const isDark = mode === 'dark'
   return {
     bg: isDark ? '#18191C' : '#F5F5F7',
-    bgHover: isDark ? '#1E1F22' : '#EDEDF0',
-    border: isDark ? '#2C2D31' : '#D1D1D6',
-    bodyText: isDark ? '#BCBEC4' : '#3C3C43',
-    mutedText: isDark ? '#7A7E85' : '#8E8E93',
+    bgHover: c.bgPanel,
+    border: c.border,
+    bodyText: c.text,
+    mutedText: c.textMuted,
     dimText: isDark ? '#4B5059' : '#AEAEB2',
-    resultBg: isDark ? '#101012' : '#FFFFFF',
+    resultBg: c.bg,
     toolName: isDark ? '#D1D3DA' : '#1D1D1F',
   }
 }
@@ -97,10 +101,12 @@ function formatDuration(ms: number): string {
 export function ToolCallCard({ data }: { data: ToolCallPayload }) {
   const [expanded, setExpanded] = useState(false)
   const t = useCardTheme()
+  const c = useColors()
+  const categoryColors = useCategoryColor()
 
   const category = TOOL_CATEGORY[data.toolName] ?? 'utility'
   const Icon = CATEGORY_ICON[category]
-  const color = CATEGORY_COLOR[category]
+  const color = categoryColors[category]
   const isRunning = data.phase === 'start'
   const summary = useMemo(() => getArgsSummary(data.toolName, data.arguments), [data.toolName, data.arguments])
 
@@ -112,7 +118,11 @@ export function ToolCallCard({ data }: { data: ToolCallPayload }) {
     <Box sx={{ borderRadius: '8px', border: `1px solid ${t.border}`, overflow: 'hidden', my: 0.5 }}>
       {/* 折叠头部 */}
       <Box
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -156,14 +166,14 @@ export function ToolCallCard({ data }: { data: ToolCallPayload }) {
             <CircularProgress size={14} thickness={5} sx={{ color }} />
           ) : data.success ? (
             <>
-              <SuccessIcon sx={{ fontSize: 14, color: '#4ADE80' }} />
+              <SuccessIcon sx={{ fontSize: 14, color: c.success }} />
               <Typography sx={{ fontSize: 11, color: t.mutedText }}>
                 {data.durationMs != null ? formatDuration(data.durationMs) : ''}
               </Typography>
             </>
           ) : (
             <>
-              <ErrorIcon sx={{ fontSize: 14, color: '#EF4444' }} />
+              <ErrorIcon sx={{ fontSize: 14, color: c.error }} />
               <Typography sx={{ fontSize: 11, color: t.mutedText }}>
                 {data.durationMs != null ? formatDuration(data.durationMs) : ''}
               </Typography>
@@ -171,7 +181,7 @@ export function ToolCallCard({ data }: { data: ToolCallPayload }) {
           )}
         </Box>
 
-        <IconButton size="small" sx={{ p: 0, ml: 0.25 }}>
+        <IconButton size="small" sx={{ p: 0, ml: 0.25 }} aria-label={expanded ? '收起详情' : '展开详情'}>
           <ChevronRightIcon
             sx={{
               fontSize: 16,
@@ -244,6 +254,7 @@ function ToolResultContent({
   success?: boolean
   theme: ReturnType<typeof useCardTheme>
 }) {
+  const c = useColors()
   const [showFull, setShowFull] = useState(false)
   const isLong = result.length > 500
   const display = showFull ? result : result.slice(0, 500)
@@ -254,7 +265,7 @@ function ToolResultContent({
         component="pre"
         sx={{
           fontSize: 11,
-          color: success === false ? '#EF4444' : t.bodyText,
+          color: success === false ? c.error : t.bodyText,
           m: 0,
           p: 1,
           bgcolor: t.bg,
@@ -274,7 +285,7 @@ function ToolResultContent({
           onClick={() => setShowFull(!showFull)}
           sx={{
             fontSize: 11,
-            color: '#5B8DEF',
+            color: c.primary,
             cursor: 'pointer',
             mt: 0.5,
             '&:hover': { textDecoration: 'underline' },

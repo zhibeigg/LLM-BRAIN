@@ -151,7 +151,12 @@ export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <Tooltip title="切换大脑">
           <Box
+            role="button"
+            tabIndex={0}
+            aria-label="切换大脑"
+            aria-haspopup="true"
             onClick={(e) => setAnchorEl(e.currentTarget)}
+            onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAnchorEl(e.currentTarget as HTMLElement) } }}
             sx={{
               display: 'flex',
               alignItems: 'center',
@@ -183,6 +188,7 @@ export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}
                 color: c.textMuted,
                 '&:hover': { color: c.error, bgcolor: `${c.error}10` },
               }}
+              aria-label="删除当前大脑"
             >
               <DeleteIcon sx={{ fontSize: 17 }} />
             </IconButton>
@@ -199,8 +205,8 @@ export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}
             sx: {
               minWidth: 220,
               maxHeight: 400,
-              border: '1px solid #E2E8F0',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+              border: `1px solid ${c.border}`,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
             },
           },
         }}
@@ -226,6 +232,7 @@ export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}
                 size="small"
                 onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(brain.id) }}
                 sx={{ ml: 1, color: c.textMuted, '&:hover': { color: c.error } }}
+                aria-label="删除大脑"
               >
                 <DeleteIcon sx={{ fontSize: 16 }} />
               </IconButton>

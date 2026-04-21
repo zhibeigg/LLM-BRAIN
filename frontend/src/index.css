@@ -4,8 +4,8 @@ html, body, #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--color-bg, #13141f);
-  color: var(--color-text, #E8EAF6);
+  background: var(--color-bg, #0D0D0F);
+  color: var(--color-text, #E4E4E8);
   font-family: 'Inter', 'Noto Sans SC', sans-serif;
 }
 
@@ -99,8 +99,8 @@ html, body, #root {
 
   /* 增大触摸目标 */
   .MuiIconButton-sizeSmall {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 44px;
+    min-height: 44px;
   }
 
   /* 优化输入框 */
@@ -133,34 +133,34 @@ html, body, #root {
 
 /* React Flow 主题 */
 .react-flow__background {
-  background: var(--color-bg, #13141f) !important;
+  background: var(--color-bg, #0D0D0F) !important;
 }
 
 .react-flow__minimap {
-  background: var(--color-bg-panel, #191a2a) !important;
+  background: var(--color-bg-panel, #16161A) !important;
   border-radius: 8px;
-  border: 1px solid var(--color-border, #333458);
+  border: 1px solid var(--color-border, #2A2B32);
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .react-flow__controls {
   border-radius: 8px;
-  border: 1px solid var(--color-border, #333458);
-  background: var(--color-bg-panel, #191a2a);
+  border: 1px solid var(--color-border, #2A2B32);
+  background: var(--color-bg-panel, #16161A);
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .react-flow__controls-button {
-  background: var(--color-bg-card, #232438) !important;
-  border-color: var(--color-border, #333458) !important;
-  color: var(--color-text-secondary, #A0A3BD) !important;
-  fill: var(--color-text-secondary, #A0A3BD) !important;
+  background: var(--color-bg-card, #1E1E24) !important;
+  border-color: var(--color-border, #2A2B32) !important;
+  color: var(--color-text-secondary, #A8A8B0) !important;
+  fill: var(--color-text-secondary, #A8A8B0) !important;
 }
 
 .react-flow__controls-button:hover {
-  background: var(--color-bg-input, #2a2b45) !important;
-  color: var(--color-primary, #E8613A) !important;
-  fill: var(--color-primary, #E8613A) !important;
+  background: var(--color-bg-input, #28282F) !important;
+  color: var(--color-primary, #5B8DEF) !important;
+  fill: var(--color-primary, #5B8DEF) !important;
 }
 
 .react-flow__controls-button svg {
@@ -177,12 +177,12 @@ html, body, #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border-light, #3e3f62);
+  background: var(--color-border-light, #3A3B45);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted, #6C6F8A);
+  background: var(--color-text-muted, #8A8A94);
 }
 
 /* React Flow 连接线 */
@@ -191,8 +191,8 @@ html, body, #root {
 }
 
 .react-flow__handle {
-  background: var(--color-text-muted, #6C6F8A) !important;
-  border-color: var(--color-bg-panel, #191a2a) !important;
+  background: var(--color-text-muted, #8A8A94) !important;
+  border-color: var(--color-bg-panel, #16161A) !important;
 }
 
 /* ========== ThinkingPanel 动画 ========== */
@@ -239,9 +239,9 @@ html, body, #root {
 
 /* Boss 评审通过/失败边框闪烁 */
 @keyframes verdictFlash {
-  0% { border-color: var(--verdict-color, #4ADE80); }
-  30% { border-color: var(--verdict-color, #4ADE80); }
-  100% { border-color: var(--color-bg-card, #2a2c3e); }
+  0% { border-color: var(--verdict-color, #5DBA7D); }
+  30% { border-color: var(--verdict-color, #5DBA7D); }
+  100% { border-color: var(--color-bg-card, #1E1E24); }
 }
 
 /* Agent 输出光标闪烁 */
@@ -276,12 +276,12 @@ html, body, #root {
 /* 标题栏运行指示器脉冲 */
 @keyframes statusPulse {
   0%, 100% {
-    box-shadow: 0 0 4px var(--status-color, #E8613A);
+    box-shadow: 0 0 4px var(--status-color, #5B8DEF);
     opacity: 1;
   }
   50% {
-    box-shadow: 0 0 12px var(--status-color, #E8613A),
-                0 0 20px color-mix(in srgb, var(--status-color, #E8613A) 30%, transparent);
+    box-shadow: 0 0 12px var(--status-color, #5B8DEF),
+                0 0 20px color-mix(in srgb, var(--status-color, #5B8DEF) 30%, transparent);
     opacity: 0.8;
   }
 }
@@ -316,7 +316,7 @@ html, body, #root {
 
 /* Agent 终端风格 */
 .agent-terminal {
-  background: var(--color-bg, #0a0b14);
+  background: var(--color-bg, #0D0D0F);
   border-radius: 6px;
   padding: 10px 12px;
   position: relative;
@@ -341,7 +341,7 @@ html, body, #root {
   display: inline-block;
   width: 8px;
   height: 16px;
-  background: var(--color-success, #4ADE80);
+  background: var(--color-success, #5DBA7D);
   margin-left: 2px;
   vertical-align: text-bottom;
   animation: cursorBlink 1s step-end infinite;
@@ -365,10 +365,22 @@ html, body, #root {
 
 .thinking-scroll-container::before {
   top: 0;
-  background: linear-gradient(to bottom, var(--color-bg-panel, #191a2a), transparent);
+  background: linear-gradient(to bottom, var(--color-bg-panel, #16161A), transparent);
 }
 
 .thinking-scroll-container::after {
   bottom: 0;
-  background: linear-gradient(to top, var(--color-bg-panel, #191a2a), transparent);
+  background: linear-gradient(to top, var(--color-bg-panel, #16161A), transparent);
+}
+
+/* 尊重用户的减弱动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

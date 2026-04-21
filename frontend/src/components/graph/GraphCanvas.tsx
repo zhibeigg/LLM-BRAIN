@@ -312,11 +312,11 @@ function ChineseControls({ onAutoLayout, isLayouting, isMobile }: ChineseControl
   )
 }
 
-/** 难度值 → 颜色 */
+/** 难度值 → 颜色（与 theme.ts 中的 diffEasy/diffMedium/diffHard 对应） */
 function diffColor(d: number): string {
-  if (d < 0.3) return '#4ADE80'
-  if (d < 0.6) return '#FBBF24'
-  return '#EF4444'
+  if (d < 0.3) return '#4ADE80'   // diffEasy
+  if (d < 0.6) return '#FBBF24'   // diffMedium
+  return '#EF4444'                 // diffHard
 }
 
 function EdgeInfoPanel() {
@@ -340,7 +340,7 @@ function EdgeInfoPanel() {
       position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
       width: 360, maxWidth: 'calc(100% - 24px)',
       borderRadius: '10px', overflow: 'hidden', zIndex: 10,
-      bgcolor: isDark ? '#1E1F22' : '#FFFFFF',
+      bgcolor: isDark ? c.bgCard : '#FFFFFF',
       border: `1px solid ${c.border}`,
       boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.5)' : '0 8px 24px rgba(0,0,0,0.12)',
     }}>
@@ -348,7 +348,7 @@ function EdgeInfoPanel() {
       <Box sx={{
         display: 'flex', alignItems: 'center', gap: 1,
         px: 1.5, py: 1,
-        bgcolor: isDark ? '#2B2D30' : '#F5F5F7',
+        bgcolor: isDark ? c.bgInput : c.bgHover,
         borderBottom: `1px solid ${c.border}`,
       }}>
         <Typography sx={{ fontSize: 12, color: c.textSecondary, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -356,7 +356,7 @@ function EdgeInfoPanel() {
           <span style={{ color: c.textMuted, margin: '0 6px' }}>→</span>
           {targetNode?.title ?? edge.targetId.slice(0, 6)}
         </Typography>
-        <IconButton size="small" onClick={() => selectEdge(null)} sx={{ p: 0.25, color: c.textMuted }}>
+        <IconButton size="small" onClick={() => selectEdge(null)} sx={{ p: 0.25, color: c.textMuted }} aria-label="关闭">
           <CloseIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>
@@ -366,7 +366,7 @@ function EdgeInfoPanel() {
         {/* 难度条 */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography sx={{ fontSize: 11, color: c.textMuted, width: 56, flexShrink: 0 }}>基础难度</Typography>
-          <Box sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: isDark ? '#3A3D41' : '#E5E5EA', overflow: 'hidden' }}>
+          <Box sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: c.border, overflow: 'hidden' }}>
             <Box sx={{ width: `${edge.baseDifficulty * 100}%`, height: '100%', borderRadius: 3, bgcolor: diffColor(edge.baseDifficulty), transition: 'width 0.3s' }} />
           </Box>
           <Typography sx={{ fontSize: 11, color: diffColor(edge.baseDifficulty), fontWeight: 600, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
@@ -377,7 +377,7 @@ function EdgeInfoPanel() {
         {perceived !== edge.baseDifficulty && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography sx={{ fontSize: 11, color: c.textMuted, width: 56, flexShrink: 0 }}>感知难度</Typography>
-            <Box sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: isDark ? '#3A3D41' : '#E5E5EA', overflow: 'hidden' }}>
+            <Box sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: c.border, overflow: 'hidden' }}>
               <Box sx={{ width: `${perceived * 100}%`, height: '100%', borderRadius: 3, bgcolor: diffColor(perceived), transition: 'width 0.3s' }} />
             </Box>
             <Typography sx={{ fontSize: 11, color: diffColor(perceived), fontWeight: 600, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
@@ -736,11 +736,11 @@ function GraphCanvasInner() {
             py: 0.5,
             borderRadius: 1,
             bgcolor: isLayouting 
-              ? 'rgba(59, 130, 246, 0.2)' 
+              ? `${c.primary}33` 
               : isAggregated 
-                ? 'rgba(251, 191, 36, 0.15)' 
+                ? `${c.warning}26` 
                 : 'rgba(0,0,0,0.3)',
-            color: isLayouting ? '#3B82F6' : isAggregated ? '#FBBF24' : '#999',
+            color: isLayouting ? c.primary : isAggregated ? c.warning : '#999',
             fontSize: 10,
             fontFamily: 'monospace',
             pointerEvents: 'none',
@@ -749,8 +749,8 @@ function GraphCanvasInner() {
           }}
         >
           <span>{visibleNodes.length}/{rfNodes.length}</span>
-          {isLayouting && <span style={{ color: '#3B82F6' }}>布局 {Math.round(layoutProgress * 100)}%</span>}
-          {isAggregated && <span style={{ color: '#FBBF24' }}>聚合</span>}
+          {isLayouting && <span style={{ color: c.primary }}>布局 {Math.round(layoutProgress * 100)}%</span>}
+          {isAggregated && <span style={{ color: c.warning }}>聚合</span>}
         </Box>
         {showMinimap && (
           <MiniMap

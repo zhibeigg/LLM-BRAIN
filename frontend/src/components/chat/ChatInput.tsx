@@ -310,6 +310,7 @@ export function ChatInput() {
                 size="small"
                 onClick={() => removePending(msg.id)}
                 sx={{ p: 0.15, color: c.textMuted, '&:hover': { color: c.error } }}
+                aria-label="移除消息"
               >
                 <CloseIcon sx={{ fontSize: 12 }} />
               </IconButton>
@@ -355,6 +356,7 @@ export function ChatInput() {
                   p: 0.15, bgcolor: 'rgba(0,0,0,0.5)', color: '#fff',
                   '&:hover': { bgcolor: c.error },
                 }}
+                aria-label="移除附件"
               >
                 <CloseIcon sx={{ fontSize: 12 }} />
               </IconButton>
@@ -375,6 +377,7 @@ export function ChatInput() {
                 color: currentModeConfig.color,
                 '&:hover': { bgcolor: `${currentModeConfig.color}15` },
               }}
+              aria-label={currentModeConfig.label}
             >
               {currentModeConfig.icon}
             </IconButton>
@@ -418,6 +421,7 @@ export function ChatInput() {
             size="small"
             onClick={() => fileInputRef.current?.click()}
             sx={{ color: c.textMuted, '&:hover': { color: c.primary, bgcolor: `${c.primary}10` } }}
+            aria-label="上传附件"
           >
             <AttachIcon sx={{ fontSize: 19 }} />
           </IconButton>
@@ -459,6 +463,7 @@ export function ChatInput() {
             onPaste={handlePaste}
             placeholder={busy ? '输入后排队执行...' : '输入任务... 或「学习 主题名」'}
             fullWidth
+            aria-label="输入任务或学习主题"
             sx={{
               fontSize: isMobile ? 16 : 14, // iOS 需要 16px 防止缩放
               color: c.text,
@@ -490,6 +495,7 @@ export function ChatInput() {
                 '&:hover': { bgcolor: btn.hoverColor },
                 '&:disabled': { bgcolor: c.bgInput, color: c.textMuted },
               }}
+              aria-label={btn.tooltip}
             >
               {btn.icon}
             </IconButton>

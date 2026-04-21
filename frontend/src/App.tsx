@@ -199,6 +199,7 @@ function MainApp() {
       <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
         {/* 移动端顶部栏 */}
         <Box
+          component="header"
           sx={{
             height: 48,
             px: 1.5,
@@ -215,6 +216,7 @@ function MainApp() {
               size="small"
               onClick={() => setMobileNavOpen(true)}
               sx={{ color: c.textMuted, mr: 0.5 }}
+              aria-label="打开菜单"
             >
               <MenuIcon sx={{ fontSize: 22 }} />
             </IconButton>
@@ -243,6 +245,7 @@ function MainApp() {
               size="small"
               onClick={() => setSettingsOpen(true)}
               sx={{ color: c.textMuted }}
+              aria-label="设置"
             >
               <SettingsIcon sx={{ fontSize: 20 }} />
             </IconButton>
@@ -274,6 +277,8 @@ function MainApp() {
 
               {/* 移动端底部 Tab 栏 */}
               <Box
+                component="nav"
+                aria-label="主导航"
                 sx={{
                   display: 'flex',
                   borderTop: `1px solid ${c.border}`,
@@ -331,6 +336,7 @@ function MainApp() {
     <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
       {/* 顶部工具栏 */}
       <Box
+        component="header"
         sx={{
           height: 52,
           px: 2.5,
@@ -345,7 +351,7 @@ function MainApp() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
           <Box
             sx={{
-              width: 9, height: 9, borderRadius: '50%',
+              width: 10, height: 10, borderRadius: '50%',
               bgcolor: c.primary, boxShadow: `0 0 8px ${c.primary}60`,
             }}
           />
@@ -373,6 +379,7 @@ function MainApp() {
               size="small"
               onClick={() => setSettingsOpen(true)}
               sx={{ color: c.textMuted, '&:hover': { color: c.primary, bgcolor: `${c.primary}15` } }}
+              aria-label="设置"
             >
               <SettingsIcon sx={{ fontSize: 20 }} />
             </IconButton>
@@ -382,6 +389,7 @@ function MainApp() {
               size="small"
               onClick={logout}
               sx={{ color: c.textMuted, '&:hover': { color: c.error, bgcolor: `${c.error}15` } }}
+              aria-label="退出登录"
             >
               <LogoutIcon sx={{ fontSize: 20 }} />
             </IconButton>
@@ -393,6 +401,7 @@ function MainApp() {
       <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* 左栏：大脑选择器始终显示 */}
         <Box
+          component="aside"
           sx={{
             width: leftWidth,
             flexShrink: 0,
@@ -419,6 +428,7 @@ function MainApp() {
         ) : (
           <>
             <Box
+              component="main"
               sx={{
                 flex: 1,
                 minWidth: CHAT_MIN,
@@ -445,6 +455,7 @@ function MainApp() {
                     top: 12,
                     right: 12,
                     width: 340,
+                    maxWidth: 'calc(100% - 24px)',
                     maxHeight: 'calc(100% - 24px)',
                     overflowY: 'auto',
                     borderRadius: '10px',
@@ -485,7 +496,11 @@ function MobileTabButton({
 }) {
   return (
     <Box
+      role="tab"
+      tabIndex={0}
+      aria-selected={active}
       onClick={onClick}
+      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       sx={{
         flex: 1,
         display: 'flex',
@@ -497,7 +512,7 @@ function MobileTabButton({
         cursor: 'pointer',
         color: active ? color.primary : color.textMuted,
         bgcolor: active ? `${color.primary}10` : 'transparent',
-        transition: 'all 0.2s ease',
+        transition: 'color 0.2s ease, background-color 0.2s ease',
         '&:active': {
           bgcolor: `${color.primary}20`,
         },

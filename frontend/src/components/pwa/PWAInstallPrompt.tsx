@@ -88,7 +88,7 @@ export function PWAInstallPrompt({ onInstalled }: PWAInstallPromptProps) {
           bottom: 24,
           right: 24,
           maxWidth: 360,
-          zIndex: 9999,
+          zIndex: 100,
           boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
           borderRadius: 2,
           overflow: 'visible',
@@ -116,6 +116,7 @@ export function PWAInstallPrompt({ onInstalled }: PWAInstallPromptProps) {
             right: 4,
             color: c.textMuted,
           }}
+          aria-label="关闭安装提示"
         >
           <CloseIcon fontSize="small" />
         </IconButton>

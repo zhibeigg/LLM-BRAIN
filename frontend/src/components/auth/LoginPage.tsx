@@ -50,6 +50,7 @@ export function LoginPage() {
       <Box
         sx={{
           width: 380,
+          maxWidth: 'calc(100vw - 32px)',
           p: 4,
           borderRadius: '16px',
           bgcolor: c.bgPanel,
@@ -61,7 +62,7 @@ export function LoginPage() {
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5, mb: 4 }}>
           <Box
             sx={{
-              width: 12, height: 12, borderRadius: '50%',
+              width: 10, height: 10, borderRadius: '50%',
               bgcolor: c.primary, boxShadow: `0 0 12px ${c.primary}60`,
             }}
           />
@@ -93,7 +94,7 @@ export function LoginPage() {
           </Alert>
         )}
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Box component="form" onSubmit={(e: React.FormEvent) => { e.preventDefault(); handleSubmit() }} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <TextField
             label="用户名"
             size="small"
@@ -135,6 +136,8 @@ export function LoginPage() {
         <Box sx={{ mt: 3, textAlign: 'center' }}>
           <Typography
             component="span"
+            role="button"
+            tabIndex={0}
             sx={{
               fontSize: 13,
               color: c.textMuted,
@@ -143,6 +146,7 @@ export function LoginPage() {
               transition: 'color 0.15s',
             }}
             onClick={() => { setIsRegister(!isRegister); setError(null) }}
+            onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsRegister(!isRegister); setError(null) } }}
           >
             {isRegister ? '已有账户？去登录' : '没有账户？去注册'}
           </Typography>
