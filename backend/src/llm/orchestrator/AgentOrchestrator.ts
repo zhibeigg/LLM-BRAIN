@@ -56,6 +56,8 @@ export class AgentOrchestrator {
     const agentStartTime = Date.now()
     const agentModel = agentConfig.model
 
+    console.log(`[AgentOrch] enabledTools=${JSON.stringify(enabledTools)}, openaiTools.length=${openaiTools.length}`)
+
     if (openaiTools.length > 0) {
       const agent = new AgentRole(personalityPrompt)
       agentResult = await agent.executeWithTools(agentInput, openaiTools, { brainId, projectPath })

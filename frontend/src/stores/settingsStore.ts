@@ -60,7 +60,19 @@ function loadSettings(): AppSettings {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { ...defaultSettings, ...parsed }
+      const result = { ...defaultSettings, ...parsed }
+      // 合并新增的默认工具：旧 localStorage 中没有的工具自动加入
+      if (Array.isArray(parsed.enabledTools)) {
+        const oldSet = new Set(parsed.enabledTools as string[])
+        const merged = [...parsed.enabledTools as string[]]
+        for (const toolId of defaultSettings.enabledTools) {
+          if (!oldSet.has(toolId)) {
+            merged.push(toolId)
+          }
+        }
+        result.enabledTools = merged
+      }
+      return result
     }
   } catch { /* ignore */ }
   return { ...defaultSettings }
