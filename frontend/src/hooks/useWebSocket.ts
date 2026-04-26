@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { wsClient } from '../services/websocket'
-import { useTaskStore, useTaskExecutionStore, useSessionStore } from '../stores/taskStore'
+import { useTaskStore, useTaskExecutionStore, useSessionStore, useQueueStore } from '../stores/taskStore'
 import { useGraphStore } from '../stores/graphStore'
 import type {
   WSMessage,
@@ -189,8 +189,7 @@ export function useWebSocket() {
     const unsubPlanReady = wsClient.on('plan_ready', (msg: WSMessage) => {
       const payload = msg.payload as PlanReadyPayload
       // 如果 autoReview 开启，自动批准
-      const state = useTaskStore.getState()
-      if (state.autoReview) {
+      if (useQueueStore.getState().autoReview) {
         const requestId = payload.requestId || `plan-${Date.now()}`
         wsClient.send('plan_response', { approved: true, requestId })
       } else {
@@ -200,8 +199,7 @@ export function useWebSocket() {
 
     const unsubStepConfirm = wsClient.on('step_confirm', (msg: WSMessage) => {
       const payload = msg.payload as StepConfirmPayload
-      const state = useTaskStore.getState()
-      if (state.autoReview) {
+      if (useQueueStore.getState().autoReview) {
         const requestId = payload.requestId || payload.stepId || `step-${Date.now()}`
         wsClient.send('step_response', { approved: true, requestId })
       } else {

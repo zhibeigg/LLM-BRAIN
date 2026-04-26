@@ -107,10 +107,10 @@ export function ChatInput() {
   const fetchBrains = useBrainStore((s) => s.fetchBrains)
   const startTask = useTaskStore((s) => s.startTask)
   const learnTopic = useTaskStore((s) => s.learnTopic)
-  const executionMode = useTaskStore((s) => s.executionMode)
-  const setExecutionMode = useTaskStore((s) => s.setExecutionMode)
-  const autoReview = useTaskStore((s) => s.autoReview)
-  const setAutoReview = useTaskStore((s) => s.setAutoReview)
+  const executionMode = useQueueStore((s) => s.executionMode)
+  const setExecutionMode = useQueueStore((s) => s.setExecutionMode)
+  const autoReview = useQueueStore((s) => s.autoReview)
+  const setAutoReview = useQueueStore((s) => s.setAutoReview)
 
   const busy = isRunning || isLearning
 
