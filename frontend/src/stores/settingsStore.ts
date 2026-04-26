@@ -71,6 +71,10 @@ function loadSettings(): AppSettings {
           }
         }
         result.enabledTools = merged
+        // 立即写回，确保下次加载时已包含新工具
+        if (merged.length > (parsed.enabledTools as string[]).length) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(result))
+        }
       }
       return result
     }
