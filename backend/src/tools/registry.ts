@@ -113,14 +113,14 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     id: 'terminal',
     name: '终端',
-    description: '在服务器上执行 Shell 命令',
+    description: '在项目目录中执行 Shell 命令（支持管道、重定向等完整 shell 语法）',
     category: 'code',
-    defaultEnabled: false,
+    defaultEnabled: true,
     parameters: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: '要执行的 Shell 命令' },
-        timeout: { type: 'number', description: '超时时间（毫秒，默认 15000，最大 30000）' },
+        command: { type: 'string', description: '要执行的 Shell 命令（支持管道、重定向等）' },
+        timeout: { type: 'number', description: '超时时间（毫秒，默认 30000，最大 60000）' },
       },
       required: ['command'],
     },

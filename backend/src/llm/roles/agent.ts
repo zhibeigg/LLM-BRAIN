@@ -24,8 +24,21 @@ export class AgentRole extends LLMRoleBase {
 - 需要数学计算 → 使用 calculator
 - 需要读取网页内容 → 使用 url_reader
 - 需要执行代码 → 使用 code_executor
-- 需要执行命令 → 使用 terminal
-不要编造搜索结果或计算结果，必须通过工具获取真实数据。`
+- 需要读取项目文件 → 使用 file_read（支持行范围）
+- 需要创建或覆盖文件 → 使用 file_write
+- 需要精确修改文件中的某段文本 → 使用 file_edit（字符串替换）
+- 需要在项目中搜索代码 → 使用 file_search（支持正则，优先使用 ripgrep）
+- 需要按文件名模式查找文件 → 使用 file_glob
+- 需要查看目录结构 → 使用 file_list
+- 需要执行 shell 命令（编译、测试、git 等） → 使用 terminal
+
+工具使用原则：
+1. 先用 file_list 或 file_glob 了解项目结构，再用 file_read 读取具体文件
+2. 修改文件优先用 file_edit（精确替换），只有创建新文件时才用 file_write
+3. 用 file_search 搜索代码比 terminal 执行 grep 更快更安全
+4. terminal 可以执行任意 shell 命令，适合编译、测试、git 操作等
+5. 不要编造搜索结果或计算结果，必须通过工具获取真实数据
+6. 每次操作后验证结果，确保修改正确`
   }
 
   /**

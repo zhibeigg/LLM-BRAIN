@@ -52,7 +52,7 @@ const defaultSettings: AppSettings = {
   defaultExecutionMode: 'auto',
   defaultAutoReview: false,
   maxRetries: 3,
-  enabledTools: ['web_search', 'url_reader', 'memory_search', 'calculator'],
+  enabledTools: ['web_search', 'url_reader', 'memory_search', 'calculator', 'terminal', 'file_read', 'file_write', 'file_edit', 'file_search', 'file_glob', 'file_list'],
 }
 
 function loadSettings(): AppSettings {
