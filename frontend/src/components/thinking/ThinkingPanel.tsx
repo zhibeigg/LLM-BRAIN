@@ -848,7 +848,6 @@ function StepCard({
   isLast: boolean
   isBusy: boolean
 }) {
-  const c = useColors()
   const t = useStepTheme()
   const stepColors = useStepColors()
   const [expanded, setExpanded] = useState(true)
@@ -859,7 +858,9 @@ function StepCard({
 
   const isVerdict = step.type === 'boss_verdict'
   const isAgent = step.type === 'agent_stream'
-  const cardClass = 'step-card'
+  const agentData = isAgent ? step.data as AgentStreamPayload : null
+  const isWaiting = isLast && isBusy && (!isAgent || agentData?.done === false)
+  const cardClass = `step-card${isVerdict ? ' step-card--verdict' : ''}${isWaiting ? ' step-card--waiting' : ''}`
 
   return (
     <Box sx={{ pb: 1.5, background: 'transparent' }}>
@@ -988,6 +989,33 @@ function EmptyState() {
         </Box>
       </Box>
       <Typography sx={{ color: c.textMuted, fontSize: 13, letterSpacing: '0.08em' }}>等待指令...</Typography>
+    </Box>
+  )
+}
+
+function WaitingResponseCard() {
+  const c = useColors()
+  return (
+    <Box sx={{ pb: 1.5 }}>
+      <Box
+        className="step-card step-card--waiting"
+        sx={{
+          borderRadius: '10px',
+          border: `1px solid ${c.text}18`,
+          bgcolor: c.bgCard,
+          px: 1.6,
+          py: 1.25,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+        }}
+      >
+        <CircularProgress size={15} sx={{ color: c.textMuted }} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{ fontSize: 12.5, color: c.text, fontWeight: 600 }}>等待 Agent 回复</Typography>
+          <Typography sx={{ fontSize: 11, color: c.textMuted, mt: 0.2 }}>正在连接模型与工具链...</Typography>
+        </Box>
+      </Box>
     </Box>
   )
 }
@@ -1197,6 +1225,9 @@ export function ThinkingPanel() {
 
   // 合并步骤
   const mergedSteps = useMemo(() => mergeSteps(displaySteps), [displaySteps])
+  const latestStep = displaySteps.at(-1)
+  const latestAgentData = latestStep?.type === 'agent_stream' ? latestStep.data as AgentStreamPayload : null
+  const showWaitingResponse = busy && !isViewingHistory && (!latestStep || latestStep.type !== 'agent_stream' || latestAgentData?.done === true)
 
   useEffect(() => {
     if (!isViewingHistory && bottomAnchorRef.current) {
@@ -1571,6 +1602,8 @@ export function ThinkingPanel() {
               })
             })()
           )}
+
+          {showWaitingResponse && <WaitingResponseCard />}
 
           <div ref={bottomAnchorRef} />
         </Box>

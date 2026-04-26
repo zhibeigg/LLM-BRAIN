@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Box, Typography, Collapse, CircularProgress } from '@mui/material'
 import {
   Description as FileIcon,
@@ -67,13 +67,26 @@ export function CodingToolCard({ toolName, args, result, success, durationMs, ph
   const summary = useMemo(() => getSummary(toolName, args), [toolName, args])
   const isRunning = phase === 'start'
 
+  useEffect(() => {
+    if (!isRunning && ['file_list', 'terminal', 'file_search', 'file_glob'].includes(toolName)) {
+      setExpanded(true)
+    }
+  }, [isRunning, toolName])
+
   return (
     <Box sx={{
-      borderRadius: '6px',
-      border: `1px solid ${c.border}`,
+      borderRadius: '10px',
+      border: `1px solid ${isRunning ? `${c.text}24` : c.border}`,
       bgcolor: c.bgCard,
       overflow: 'hidden',
-      my: 0.5,
+      my: 0.75,
+      position: 'relative',
+      boxShadow: isRunning ? `0 0 0 1px ${c.text}08, 0 0 18px ${c.text}10` : 'none',
+      animation: isRunning ? 'waitingToolGlow 2.4s ease-in-out infinite' : 'none',
+      '@keyframes waitingToolGlow': {
+        '0%, 100%': { boxShadow: `0 0 0 1px ${c.text}06, 0 0 10px ${c.text}08` },
+        '50%': { boxShadow: `0 0 0 1px ${c.text}20, 0 0 24px ${c.text}18` },
+      },
     }}>
       {/* 折叠头部 */}
       <Box
@@ -91,10 +104,11 @@ export function CodingToolCard({ toolName, args, result, success, durationMs, ph
           display: 'flex',
           alignItems: 'center',
           gap: 1,
-          px: 1.25,
-          py: 0.75,
+          px: 1.5,
+          py: 0.9,
           cursor: isRunning ? 'default' : 'pointer',
-          transition: 'background-color 0.15s',
+          background: isRunning ? `linear-gradient(90deg, ${c.bgCard}, ${c.bgHover}66, ${c.bgCard})` : c.bgCard,
+          transition: 'background-color 0.18s ease-out',
           '&:hover': isRunning ? {} : { bgcolor: c.bgHover },
         }}
       >
@@ -129,7 +143,10 @@ export function CodingToolCard({ toolName, args, result, success, durationMs, ph
         {/* 状态指示 */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
           {isRunning ? (
-            <CircularProgress size={14} sx={{ color: c.toolCoding }} />
+            <>
+              <Typography sx={{ fontSize: 10.5, color: c.textMuted, letterSpacing: '0.06em' }}>执行中</Typography>
+              <CircularProgress size={14} sx={{ color: c.textMuted }} />
+            </>
           ) : success ? (
             <>
               <CheckIcon sx={{ fontSize: 14, color: c.success }} />
@@ -188,8 +205,26 @@ function ToolResultContent({
 
   if (!result && success === undefined) {
     return (
-      <Box sx={{ p: 1.5, color: c.textMuted, fontSize: 11 }}>
-        等待结果...
+      <Box sx={{
+        p: 1.5,
+        color: c.textMuted,
+        fontSize: 11,
+        position: 'relative',
+        overflow: 'hidden',
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          background: `linear-gradient(90deg, transparent, ${c.text}10, transparent)`,
+          transform: 'translateX(-100%)',
+          animation: 'waitingResultSweep 2.2s ease-in-out infinite',
+        },
+        '@keyframes waitingResultSweep': {
+          '0%': { transform: 'translateX(-100%)' },
+          '55%, 100%': { transform: 'translateX(100%)' },
+        },
+      }}>
+        等待工具返回结果...
       </Box>
     )
   }
@@ -340,26 +375,48 @@ function ToolResultContent({
 
   // file_list — 目录树
   if (toolName === 'file_list' && result) {
+    const lines = result.split('\n')
+    const root = lines[0] ?? '.'
+    const tree = lines.slice(1).join('\n')
     return (
-      <Box sx={{
-        maxHeight: 400,
-        overflow: 'auto',
-        bgcolor: c.bgInput,
-      }}>
-        <Typography
-          component="pre"
-          sx={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 11,
-            color: c.text,
-            whiteSpace: 'pre',
-            m: 0,
-            p: 1.5,
-            lineHeight: 1.5,
-          }}
-        >
-          {result}
-        </Typography>
+      <Box sx={{ bgcolor: c.bgInput }}>
+        <Box sx={{
+          px: 1.5,
+          py: 0.7,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.75,
+          borderBottom: `1px solid ${c.border}`,
+          bgcolor: c.bgCard,
+        }}>
+          <FolderIcon sx={{ fontSize: 14, color: c.toolCoding }} />
+          <Typography sx={{ fontSize: 11, color: c.textMuted }}>目录结构</Typography>
+          <Typography sx={{ fontSize: 11, color: c.filePathText, fontFamily: '"JetBrains Mono", monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {root}
+          </Typography>
+        </Box>
+        <Box sx={{
+          maxHeight: 460,
+          overflow: 'auto',
+          px: 1.5,
+          py: 1.2,
+        }}>
+          <Typography
+            component="pre"
+            sx={{
+              fontFamily: '"JetBrains Mono", "Cascadia Code", monospace',
+              fontSize: 11.5,
+              color: c.textSecondary,
+              whiteSpace: 'pre',
+              m: 0,
+              lineHeight: 1.65,
+              tabSize: 2,
+              '&::selection': { bgcolor: `${c.primary}30` },
+            }}
+          >
+            {tree || result}
+          </Typography>
+        </Box>
       </Box>
     )
   }

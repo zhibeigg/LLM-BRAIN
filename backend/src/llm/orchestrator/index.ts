@@ -12,10 +12,25 @@ import { ApprovalManager } from './ApprovalManager.js'
 import { getDimensionsByBrainId } from '../../db/personality.js'
 import { getMappings } from '../../db/difficulty-mapping.js'
 import { autoExtractNodes } from '../../core/extraction/engine.js'
-import { getNodeById } from '../../db/nodes.js'
+import { getNodeById, getNodesByBrainId } from '../../db/nodes.js'
 import { getBrainById } from '../../db/brains.js'
 
 const MAX_RETRIES = 3
+
+function isDirectProjectInspectionTask(taskPrompt: string, enabledTools: string[], projectPath?: string): boolean {
+  if (!projectPath) return false
+  const hasInspectionTool = enabledTools.some(tool => ['file_list', 'file_glob', 'file_search', 'file_read', 'terminal'].includes(tool))
+  if (!hasInspectionTool) return false
+
+  const prompt = taskPrompt.toLowerCase()
+  return [
+    /列出.*(目录|项目).*(结构|树|文件)/,
+    /(查看|展示|显示).*(目录|项目).*(结构|树|文件)/,
+    /(目录结构|项目结构|文件树|文件列表)/,
+    /list.*(directory|project|file).*(tree|structure|files?)/,
+    /(show|display).*(directory|project|file).*(tree|structure|files?)/,
+  ].some(pattern => pattern.test(prompt))
+}
 
 /**
  * 统一导出的 Orchestrator 主类
@@ -211,6 +226,20 @@ export class Orchestrator {
     const dimensions = getDimensionsByBrainId(brainId)
     const mappings = getMappings()
     const brain = getBrainById(brainId)
+
+    if (isDirectProjectInspectionTask(taskPrompt, this._enabledTools, brain?.projectPath)) {
+      this.checkAborted()
+      const personalityNode = getNodesByBrainId(brainId).find(node => node.type === 'personality')
+      const memoryContext = personalityNode ? `[${personalityNode.title}]: ${personalityNode.content}` : ''
+      return this.agentOrchestrator.execute(
+        taskPrompt,
+        dimensions,
+        memoryContext,
+        this._enabledTools,
+        brainId,
+        brain?.projectPath
+      )
+    }
 
     // ── Leader 决策循环（支持回退） ──
     this.checkAborted()

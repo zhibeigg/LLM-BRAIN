@@ -39,11 +39,18 @@ interface MarkdownRendererProps {
   fontSize?: number
 }
 
+const INLINE_TOOL_TAG_RE = /<(file_list|file_read|file_write|file_edit|file_search|file_glob|terminal|calculator|web_search|url_reader|browser)\b[^<>]*?\/>/g
+
+function sanitizeAgentMarkdown(content: string): string {
+  return content.replace(INLINE_TOOL_TAG_RE, '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export function MarkdownRenderer({ content, color, fontSize = 13 }: MarkdownRendererProps) {
   const c = useColors()
   const { mode } = useThemeMode()
   const textColor = color ?? c.text
   const codeTheme = useCodeTheme(mode)
+  const safeContent = useMemo(() => sanitizeAgentMarkdown(content), [content])
 
   const components = useMemo(() => ({
     // 段落
@@ -63,7 +70,7 @@ export function MarkdownRenderer({ content, color, fontSize = 13 }: MarkdownRend
       <Typography component="h5" sx={{ color: textColor, fontSize: fontSize + 1, fontWeight: 600, mt: 1, mb: 0.5 }}>{children}</Typography>
     ),
     // 行内代码
-    code: ({ className, children, ...props }: { className?: string; children?: React.ReactNode; node?: unknown }) => {
+    code: ({ className, children }: { className?: string; children?: React.ReactNode; node?: unknown }) => {
       const match = /language-(\w+)/.exec(className || '')
       const codeStr = String(children).replace(/\n$/, '')
 
@@ -157,9 +164,11 @@ export function MarkdownRenderer({ content, color, fontSize = 13 }: MarkdownRend
     ),
   }), [textColor, fontSize, c, codeTheme])
 
+  if (!safeContent) return null
+
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components as never}>
-      {content}
+      {safeContent}
     </ReactMarkdown>
   )
 }

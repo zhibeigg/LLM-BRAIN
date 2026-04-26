@@ -52,9 +52,11 @@ function normalizeInlineToolArgs(toolName: string, args: Record<string, unknown>
     delete normalized.maxDepth
   }
 
-  // file_list 没有 recursive 参数；模型用 XML 风格工具标签时常会带上，忽略即可。
+  // file_list 没有 recursive/max_entries 参数；模型用 XML 风格工具标签时常会带上，忽略即可。
   if (toolName === 'file_list') {
     delete normalized.recursive
+    delete normalized.max_entries
+    delete normalized.maxEntries
   }
 
   return normalized
@@ -91,6 +93,23 @@ function parseInlineToolCalls(content: string, tools: OpenAIToolDef[], round: nu
   })
 
   return { content: cleaned.trim(), toolCalls }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function broadcastAgentText(content: string, done = false): Promise<void> {
+  const text = content.replace(/\r\n/g, '\n')
+  const chunkSize = 28
+  for (let i = 0; i < text.length; i += chunkSize) {
+    broadcast('agent_stream', { chunk: text.slice(i, i + chunkSize), done: false } satisfies AgentStreamPayload)
+    // 微小节流让前端能呈现流式增长，同时避免刷屏阻塞。
+    await delay(10)
+  }
+  if (done) {
+    broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
+  }
 }
 
 export class AgentRole extends LLMRoleBase {
@@ -164,27 +183,42 @@ export class AgentRole extends LLMRoleBase {
         }
       }
 
-      // 如果没有 tool_calls，说明进入最终回答阶段。
-      // 不要再发起一次不带 tools 的流式重试，否则部分模型会把工具调用写成正文 XML 标签。
+      // 如果没有 tool_calls，说明可能进入最终回答阶段。
+      // 某些兼容 Responses API 会在非流式请求返回空响应，此时兜底收集一次流式文本；
+      // 但不要边收集边广播，先检查里面是否混入了 XML 风格伪工具调用。
       if (!result.tool_calls || result.tool_calls.length === 0) {
-        console.log(`[Agent] round ${round}: no tool_calls, using final content`)
-        if (result.content) {
-          broadcast('agent_stream', { chunk: result.content, done: false } satisfies AgentStreamPayload)
-          broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
+        if (!result.content) {
+          console.log(`[Agent] round ${round}: no content/tool_calls, collecting fallback stream for inline tool detection`)
+          let fallbackContent = ''
+          for await (const chunk of this.chatStreamWithMessages(messages)) {
+            fallbackContent += chunk.content
+          }
+          result.content = fallbackContent
+
+          if (fallbackContent) {
+            const parsedInline = parseInlineToolCalls(fallbackContent, tools, round)
+            if (parsedInline.toolCalls.length > 0) {
+              result.content = parsedInline.content
+              result.tool_calls = parsedInline.toolCalls
+              console.log(`[Agent] round ${round}: parsed ${parsedInline.toolCalls.length} inline XML-style tool calls from fallback stream`)
+            }
+          }
+        }
+
+        if (!result.tool_calls || result.tool_calls.length === 0) {
+          console.log(`[Agent] round ${round}: no tool_calls, using final content`)
+          if (result.content) {
+            await broadcastAgentText(result.content, true)
+          } else {
+            broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
+          }
           return result.content
         }
-
-        let content = ''
-        for await (const chunk of this.chatStreamWithMessages(messages)) {
-          content += chunk.content
-          broadcast('agent_stream', { chunk: chunk.content, done: chunk.done } satisfies AgentStreamPayload)
-        }
-        return content
       }
 
-      // 有 tool_calls 且有中间思考内容时，推送给前端
+      // 有 tool_calls 且有中间思考内容时，按小块推送给前端
       if (result.content) {
-        broadcast('agent_stream', { chunk: result.content, done: false } satisfies AgentStreamPayload)
+        await broadcastAgentText(result.content)
       }
 
       // 有 tool_calls：将 assistant 消息（含 tool_calls）加入上下文
