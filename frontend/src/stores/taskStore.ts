@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
+import { enableMapSet } from 'immer'
 import { useShallow } from 'zustand/shallow'
+
+// 启用 Immer 的 MapSet 插件，支持 Set/Map 类型的状态
+enableMapSet()
 import type {
   LeaderStepPayload,
   LeaderDecisionPayload,
@@ -769,7 +773,9 @@ const legacyStore = create<LegacyTaskStore>()(
       useSessionStore.getState().addSession(newSession)
 
       try {
-        await taskApi.execute(prompt, brainId, useQueueStore.getState().executionMode, useSettingsStore.getState().enabledTools)
+        const tools = useSettingsStore.getState().enabledTools
+        console.log('[startTask] enabledTools:', tools)
+        await taskApi.execute(prompt, brainId, useQueueStore.getState().executionMode, tools)
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : '任务执行失败'
         useTaskExecutionStore.getState().setError(errMsg)
