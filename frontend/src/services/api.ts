@@ -250,6 +250,9 @@ export const taskApi = {
 
   removeFromQueue: (id: string) =>
     request<{ status: string }>(`/task/queue/${id}`, { method: 'DELETE' }),
+
+  abort: () =>
+    request<{ status: string; message: string }>('/task/abort', { method: 'POST' }),
 }
 
 // ===== 学习 API =====

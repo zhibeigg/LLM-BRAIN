@@ -58,11 +58,17 @@ export class AgentRole extends LLMRoleBase {
       { role: 'user', content: userMessage },
     ]
 
+    console.log(`[Agent] executeWithTools: ${tools.length} tools enabled, projectPath=${toolCtx.projectPath ?? '(none)'}`)
+    console.log(`[Agent] tool names: ${tools.map(t => t.function.name).join(', ')}`)
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      console.log(`[Agent] round ${round}: calling chatWithMessages with ${tools.length} tools`)
       const result = await this.chatWithMessages(messages, tools)
+      console.log(`[Agent] round ${round}: content=${result.content?.length ?? 0} chars, tool_calls=${result.tool_calls?.length ?? 0}`)
 
       // 如果没有 tool_calls，说明进入最终回答阶段；改用流式请求重新生成最终回答
       if (!result.tool_calls || result.tool_calls.length === 0) {
+        console.log(`[Agent] round ${round}: no tool_calls, streaming final answer`)
         let content = ''
         for await (const chunk of this.chatStreamWithMessages(messages)) {
           content += chunk.content

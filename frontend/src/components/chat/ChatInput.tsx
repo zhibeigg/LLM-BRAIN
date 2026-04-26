@@ -20,7 +20,7 @@ import {
 import { useQueueStore, useTaskExecutionStore, useTaskStore } from '../../stores/taskStore'
 import { useBrainStore } from '../../stores/brainStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { brainsApi } from '../../services/api'
+import { brainsApi, taskApi } from '../../services/api'
 import { useColors } from '../../ThemeContext'
 import { useResponsive } from '../../hooks/useResponsive'
 import type { ExecutionMode } from '../../types'
@@ -432,11 +432,11 @@ export function ChatInput() {
   const hasPendingQueue = pendingQueue.length > 0
 
   // 按钮状态
-  type ButtonMode = 'send' | 'queue' | 'stop' | 'loading'
+  type ButtonMode = 'send' | 'queue' | 'stop' | 'abort'
   let buttonMode: ButtonMode = 'send'
   if (busy && hasInput) buttonMode = 'queue'
   else if (busy && !hasInput && hasPendingQueue) buttonMode = 'stop'
-  else if (busy && !hasInput) buttonMode = 'loading'
+  else if (busy && !hasInput) buttonMode = 'abort'
 
   const buttonConfig = {
     send: {
@@ -458,6 +458,13 @@ export function ChatInput() {
       hoverColor: c.errorHover,
       icon: <StopIcon sx={{ fontSize: 18 }} />,
       tooltip: `清空队列 (${pendingQueue.length})`,
+      disabled: false,
+    },
+    abort: {
+      color: c.error,
+      hoverColor: c.errorHover,
+      icon: <StopIcon sx={{ fontSize: 18 }} />,
+      tooltip: '强行终止',
       disabled: false,
     },
     loading: {
@@ -483,6 +490,10 @@ export function ChatInput() {
   const handleButtonClick = useCallback(() => {
     if (buttonMode === 'stop') {
       setPendingQueue([])
+      return
+    }
+    if (buttonMode === 'abort') {
+      taskApi.abort().catch(console.error)
       return
     }
     if (executionMode === 'readonly') return

@@ -45,13 +45,16 @@ export abstract class LLMRoleBase {
     if (!config) throw new Error(`角色 ${this.role} 未配置 LLM`)
 
     const adapter = getAdapter(config.providerId, config.model)
-    return adapter.chat({
+    console.log(`[LLMBase] chatWithMessages: role=${this.role}, model=${config.model}, tools=${tools?.length ?? 0}, messages=${messages.length}`)
+    const result = await adapter.chat({
       messages,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       tools: tools && tools.length > 0 ? tools : undefined,
       tool_choice: toolChoice,
     })
+    console.log(`[LLMBase] chatWithMessages result: content=${result.content?.length ?? 0}, tool_calls=${result.tool_calls?.length ?? 0}`)
+    return result
   }
 
   async *chatStream(userMessage: string, context?: ChatMessage[]): AsyncGenerator<StreamChunk> {

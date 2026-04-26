@@ -34,6 +34,7 @@ export class Orchestrator {
   private _mode: ExecutionMode = 'auto'
   private _enabledTools: string[] = []
   private retryCount = 0
+  private _abortController: AbortController | null = null
 
   constructor() {
     // 审批管理器已在其构造函数中初始化监听
@@ -55,6 +56,21 @@ export class Orchestrator {
 
   get enabledTools(): string[] {
     return this._enabledTools
+  }
+
+  /** 强行终止当前执行中的任务 */
+  abort(): boolean {
+    if (!this._abortController) return false
+    this._abortController.abort()
+    this._abortController = null
+    return true
+  }
+
+  /** 检查是否已被终止，如果是则抛出错误 */
+  private checkAborted() {
+    if (this._abortController?.signal.aborted) {
+      throw new Error('任务已被用户终止')
+    }
   }
 
   /** 获取运行状态（线程安全） */
@@ -174,10 +190,12 @@ export class Orchestrator {
 
       this.taskQueue.isRunning = true
       this.retryCount = 0
+      this._abortController = new AbortController()
 
       try {
         return await this._executeTaskInner(taskPrompt, brainId)
       } finally {
+        this._abortController = null
         if (!_fromQueue) {
           this.taskQueue.isRunning = false
           this._onTaskFinished()
@@ -189,11 +207,13 @@ export class Orchestrator {
   }
 
   private async _executeTaskInner(taskPrompt: string, brainId: string): Promise<string> {
+    this.checkAborted()
     const dimensions = getDimensionsByBrainId(brainId)
     const mappings = getMappings()
     const brain = getBrainById(brainId)
 
     // ── Leader 决策循环（支持回退） ──
+    this.checkAborted()
     const { visitedPath, collectedMemories, totalSteps } = await this.leaderOrchestrator.executeDecisionLoop(
       taskPrompt,
       brainId,
@@ -235,6 +255,7 @@ export class Orchestrator {
     }
 
     // ── Agent 执行 ──
+    this.checkAborted()
     const memoryContext = collectedMemories.map(n => `[${n.title}]: ${n.content}`).join('\n\n')
     const agentResult = await this.agentOrchestrator.execute(
       taskPrompt,
@@ -246,6 +267,7 @@ export class Orchestrator {
     )
 
     // ── Boss 验证 ──
+    this.checkAborted()
     const { passed, isLoop } = await this.bossOrchestrator.verify(
       taskPrompt,
       agentResult,

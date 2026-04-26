@@ -197,6 +197,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
   private async chatResponses(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
     const body = this.buildResponsesInput(options)
+    console.log(`[OpenAI-Responses] POST ${this.baseUrl}/responses, tools=${(body.tools as unknown[])?.length ?? 0}, model=${this.model}`)
 
     const res = await this.fetchWithRetry(`${this.baseUrl}/responses`, {
       method: 'POST',
@@ -219,8 +220,10 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     let content = typeof data.output_text === 'string' ? data.output_text : ''
     const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = []
 
+    console.log(`[OpenAI-Responses] parseResult: output items=${output?.length ?? 0}, output_text=${content.length} chars, status=${data.status}`)
     if (output) {
       for (const item of output) {
+        console.log(`[OpenAI-Responses]   item type=${item.type}, id=${item.id ?? item.call_id ?? '?'}`)
         if (item.type === 'message') {
           const contentArr = item.content as Array<Record<string, unknown>> | undefined
           if (contentArr) {

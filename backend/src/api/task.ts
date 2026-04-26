@@ -69,3 +69,13 @@ taskRouter.delete('/queue/:id', async (req, res) => {
     res.status(404).json({ error: '队列中未找到该任务' })
   }
 })
+
+// POST /api/task/abort - 强行终止当前执行中的任务
+taskRouter.post('/abort', (_req, res) => {
+  const aborted = orchestrator.abort()
+  if (aborted) {
+    res.json({ status: 'aborted', message: '任务终止信号已发送' })
+  } else {
+    res.json({ status: 'no_task', message: '当前没有执行中的任务' })
+  }
+})
