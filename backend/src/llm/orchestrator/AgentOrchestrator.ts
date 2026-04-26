@@ -44,7 +44,12 @@ export class AgentOrchestrator {
     }
 
     const personalityPrompt = this.buildPersonalityPrompt(dimensions)
-    const agentInput = `任务：${taskPrompt}\n\n参考记忆：\n${memoryContext}`
+
+    // 构建 Agent 输入，包含项目路径上下文
+    let agentInput = `任务：${taskPrompt}\n\n参考记忆：\n${memoryContext}`
+    if (projectPath) {
+      agentInput = `项目目录：${projectPath}\n\n${agentInput}\n\n注意：你可以通过工具直接操作上述项目目录中的文件。所有 file_* 工具的路径参数都相对于此项目目录。terminal 工具的工作目录也是此项目目录。请主动使用工具完成任务，不要只给出建议。`
+    }
 
     let agentResult = ''
     const openaiTools = buildOpenAITools(enabledTools)
