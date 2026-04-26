@@ -459,22 +459,21 @@ function PathChoiceCard({
   // phase 2: 展示决策结果（decision 到达后再延迟 ~300ms）
   // 如果挂载时 decision 已存在（历史数据 / 回放），直接跳到 phase 2
   const [phase, setPhase] = useState(() => isDecided ? 2 : 0)
-  const mountedRef = useRef(false)
 
+  // phase 0 → 1：展示候选列表
   useEffect(() => {
-    // 历史数据已经在 phase 2，跳过
-    if (mountedRef.current) return
-    mountedRef.current = true
-    if (isDecided) return // 挂载时已有 decision，无需动画
-    // phase 0 → 1：展示候选列表
+    if (phase !== 0) return
     const t1 = setTimeout(() => setPhase(1), 150)
     return () => clearTimeout(t1)
-  }, [isDecided])
+  }, [phase])
 
+  // phase 1 → 2：decision 到达后延迟展示结果
   useEffect(() => {
-    if (phase < 1 || !isDecided || phase >= 2) return
-    // phase 1 → 2：decision 到达后延迟展示结果
-    const t2 = setTimeout(() => setPhase(2), 300)
+    if (!isDecided) return
+    // decision 到达时，如果还在 phase 0/1，直接跳到 2（或延迟一点）
+    if (phase >= 2) return
+    const delay = phase === 0 ? 50 : 300
+    const t2 = setTimeout(() => setPhase(2), delay)
     return () => clearTimeout(t2)
   }, [phase, isDecided])
 
