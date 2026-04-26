@@ -1,4 +1,5 @@
-import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, ChatMessage, OpenAIToolDef, StreamChunk } from './base.js'
+import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, ChatMessage, OpenAIToolDef, StreamChunk, RetryConfig } from './base.js'
+import { DEFAULT_RETRY_CONFIG, isRetryableStatus, computeBackoff } from './base.js'
 
 type AnthropicTextBlock = { type: 'text'; text: string }
 type AnthropicToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown }
@@ -14,11 +15,13 @@ export class AnthropicAdapter implements LLMProviderAdapter {
   private baseUrl: string
   private apiKey: string
   private model: string
+  private retryConfig: RetryConfig
 
-  constructor(baseUrl: string, apiKey: string, model: string) {
+  constructor(baseUrl: string, apiKey: string, model: string, retryConfig?: Partial<RetryConfig>) {
     this.baseUrl = baseUrl.replace(/\/$/, '')
     this.apiKey = apiKey
     this.model = model
+    this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...retryConfig }
   }
 
   private get headers(): Record<string, string> {
@@ -32,16 +35,11 @@ export class AnthropicAdapter implements LLMProviderAdapter {
   async chat(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
     const body = this.buildMessagesBody(options)
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    const res = await this.fetchWithRetry(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
     })
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText)
-      throw new Error(`Anthropic API 错误 (${res.status}): ${err.substring(0, 500)}`)
-    }
 
     const data = await res.json() as Record<string, unknown>
     return this.parseMessageResult(data)
@@ -51,16 +49,11 @@ export class AnthropicAdapter implements LLMProviderAdapter {
     const body = this.buildMessagesBody(options)
     body.stream = true
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    const res = await this.fetchStreamWithTimeout(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
     })
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText)
-      throw new Error(`Anthropic stream 错误 (${res.status}): ${err.substring(0, 500)}`)
-    }
 
     yield* this.parseSSE(res, (parsed) => {
       if (parsed.type === 'content_block_delta') {
@@ -190,6 +183,69 @@ export class AnthropicAdapter implements LLMProviderAdapter {
         }
       })() : undefined,
     }
+  }
+
+  // ==================== 带重试和超时的 fetch ====================
+
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      return await fetch(url, { ...init, signal: controller.signal })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new Error(`Anthropic 请求超时 (${timeoutMs}ms, model: ${this.model})`)
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    const { maxRetries, timeoutMs } = this.retryConfig
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await this.fetchWithTimeout(url, init, timeoutMs)
+        if (res.ok) return res
+
+        if (isRetryableStatus(res.status) && attempt < maxRetries) {
+          let delay = computeBackoff(attempt, this.retryConfig)
+          const retryAfter = res.headers.get('Retry-After')
+          if (retryAfter) {
+            const retryMs = parseInt(retryAfter, 10) * 1000
+            if (!isNaN(retryMs) && retryMs > 0) delay = Math.min(retryMs, this.retryConfig.maxDelayMs)
+          }
+          console.warn(`[Anthropic] ${res.status} 重试 ${attempt + 1}/${maxRetries}，等待 ${delay}ms`)
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+
+        const errText = await res.text().catch(() => res.statusText)
+        throw new Error(`Anthropic API 错误 (${res.status}): ${errText.substring(0, 500)}`)
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+        if (attempt < maxRetries && !(lastError.message.includes('Anthropic API 错误'))) {
+          const delay = computeBackoff(attempt, this.retryConfig)
+          console.warn(`[Anthropic] 网络错误重试 ${attempt + 1}/${maxRetries}: ${lastError.message}`)
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+        throw lastError
+      }
+    }
+    throw lastError ?? new Error('Anthropic 请求失败')
+  }
+
+  private async fetchStreamWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const res = await this.fetchWithTimeout(url, init, this.retryConfig.streamTimeoutMs)
+    if (!res.ok) {
+      const err = await res.text().catch(() => res.statusText)
+      throw new Error(`Anthropic stream 错误 (${res.status}): ${err.substring(0, 500)}`)
+    }
+    return res
   }
 
   private async *parseSSE(

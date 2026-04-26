@@ -151,3 +151,9 @@ export function deleteNode(id: string): boolean {
   const result = stmt.run(id)
   return result.changes > 0
 }
+
+export function getNodeCountByBrainId(brainId: string): number {
+  const db = getDb()
+  const row = db.prepare('SELECT COUNT(*) as count FROM nodes WHERE brain_id = ?').get(brainId) as { count: number }
+  return row.count
+}

@@ -8,6 +8,7 @@ import {
   createNode,
   updateNode,
   deleteNode,
+  getNodeCountByBrainId,
 } from '../db/nodes.js'
 import { getAllEdges } from '../db/edges.js'
 import { getBrainById } from '../db/brains.js'
@@ -89,6 +90,19 @@ nodesRouter.post('/auto-layout', (req, res) => {
     }
 
     res.json(updated)
+  } catch (e) {
+    res.status(500).json({ error: String(e) })
+  }
+})
+
+// GET /count?brainId= - 获取节点数量（轻量查询，供前端判断是否启用简化渲染）
+nodesRouter.get('/count', (req, res) => {
+  try {
+    const brainId = req.query.brainId as string | undefined
+    if (!brainId) { res.status(400).json({ error: 'brainId is required' }); return }
+    const check = verifyBrainOwnership(brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
+    res.json({ count: getNodeCountByBrainId(brainId) })
   } catch (e) {
     res.status(500).json({ error: String(e) })
   }

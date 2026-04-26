@@ -9,6 +9,7 @@ import { authRouter } from './api/auth.js'
 import { authMiddleware } from './middleware/auth.js'
 import { errorHandler, notFoundHandler, registerGlobalErrorHandlers } from './middleware/errorHandler.js'
 import { initWebSocket } from './ws/server.js'
+import { decayUnusedEdges } from './core/evolution/engine.js'
 
 // 注册全局错误监听
 registerGlobalErrorHandlers()
@@ -58,13 +59,26 @@ server.listen(PORT, () => {
   console.log(`LLM-BRAIN backend running on http://localhost:${PORT}`)
 })
 
+// 每 6 小时执行一次边衰减，让未使用的知识路径逐渐淡化
+const DECAY_INTERVAL_MS = 6 * 60 * 60 * 1000
+const decayTimer = setInterval(() => {
+  try {
+    decayUnusedEdges()
+    console.log('[evolution] 边衰减调度完成')
+  } catch (err) {
+    console.error('[evolution] 边衰减调度失败:', err)
+  }
+}, DECAY_INTERVAL_MS)
+
 process.on('SIGINT', () => {
+  clearInterval(decayTimer)
   closeDb()
   server.close()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
+  clearInterval(decayTimer)
   closeDb()
   server.close()
   process.exit(0)

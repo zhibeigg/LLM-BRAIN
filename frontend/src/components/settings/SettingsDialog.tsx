@@ -22,6 +22,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import type { FontFamily, SendKey } from '../../stores/settingsStore'
 import type { ExecutionMode } from '../../types'
 import { useUpdater } from '../../hooks/useUpdater'
+import { useI18n } from '../../i18n'
 
 interface SettingsDialogProps {
   open: boolean
@@ -117,6 +118,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const c = useColors()
   const { mode, setMode } = useThemeMode()
   const settings = useSettingsStore()
+  const { locale: i18nLocale, setLocale: setI18nLocale } = useI18n()
 
   const [tab, setTab] = useState(0)
   const [providers, setProviders] = useState<LLMProvider[]>([])
@@ -498,10 +500,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                         { value: 1, label: '1' }, { value: 3, label: '3' },
                         { value: 5, label: '5' }, { value: 10, label: '10' },
                       ]}
-                      size="small" sx={{ color: c.primary }}
-                    />
-                  </Box>
+                    size="small" sx={{ color: c.primary }}
+                  />
                 </Box>
+
+                {/* 语言 */}
+                {groupTitle('语言 / Language')}
+                <ToggleButtonGroup value={i18nLocale} exclusive
+                  onChange={(_, v) => { if (v) setI18nLocale(v) }} sx={segBtnSx}>
+                  <ToggleButton value="zh-CN">中文</ToggleButton>
+                  <ToggleButton value="en">English</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
               </Box>
             )}
 

@@ -11,6 +11,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "LLM-BRAIN - 有向记忆图智能体系统",
         "width": 1400,
         "height": 900,
@@ -18,7 +19,8 @@
         "minHeight": 700,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true
+        "decorations": true,
+        "center": true
       }
     ],
     "security": {
@@ -35,10 +37,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "shortDescription": "有向记忆图 + 多角色 LLM 类脑智能体系统",
+    "longDescription": "LLM-BRAIN 用有向图模拟大脑的记忆网络，每个节点是一个知识/记忆片段，边代表知识间的依赖关系。系统通过性格参数影响路径选择，让同一张图谱在不同性格下表现出不同的推理行为。",
+    "copyright": "Copyright © 2025 LLM-BRAIN",
+    "category": "DeveloperTool",
     "windows": {
       "wix": null,
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "displayLanguageSelector": true,
+        "languages": ["SimpChinese", "English"]
       }
     }
   },
@@ -48,15 +56,6 @@
     },
     "dialog": {
       "open": true
-    },
-    "updater": {
-      "endpoints": [
-        "https://releases.llm-brain.com/{{target}}/{{arch}}/{{current_version}}"
-      ],
-      "pubkey": "YOUR_ED25519_PUBLIC_KEY_HERE",
-      "windows": {
-        "installMode": "passive"
-      }
     }
   }
 }

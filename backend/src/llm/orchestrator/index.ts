@@ -240,7 +240,11 @@ export class Orchestrator {
 
     if (passed) {
       this.difficultyAdjuster.adjustPathDifficulty(visitedPath, true)
-      autoExtractNodes(taskPrompt, agentResult, brainId).catch(err => console.error('Auto extraction failed:', err))
+      // 只有 Agent 回答足够长（包含实质内容）时才触发知识蒸馏
+      // 过短的回答通常是简单问答/闲聊，不值得创建节点
+      if (agentResult.length >= 100) {
+        autoExtractNodes(taskPrompt, agentResult, brainId).catch(err => console.error('Auto extraction failed:', err))
+      }
     }
 
     return agentResult

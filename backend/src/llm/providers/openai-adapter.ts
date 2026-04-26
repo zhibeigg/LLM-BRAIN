@@ -1,17 +1,20 @@
 import type { LLMApiMode } from '../../types/index.js'
-import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, StreamChunk } from './base.js'
+import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, StreamChunk, RetryConfig } from './base.js'
+import { DEFAULT_RETRY_CONFIG, isRetryableStatus, computeBackoff } from './base.js'
 
 export class OpenAIAdapter implements LLMProviderAdapter {
   private baseUrl: string
   private apiKey: string
   private model: string
   private apiMode: LLMApiMode
+  private retryConfig: RetryConfig
 
-  constructor(baseUrl: string, apiKey: string, model: string, apiMode: LLMApiMode = 'auto') {
+  constructor(baseUrl: string, apiKey: string, model: string, apiMode: LLMApiMode = 'auto', retryConfig?: Partial<RetryConfig>) {
     this.baseUrl = baseUrl.replace(/\/$/, '')
     this.apiKey = apiKey
     this.model = model
     this.apiMode = apiMode
+    this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...retryConfig }
   }
 
   private get useResponsesApi(): boolean {
@@ -68,16 +71,11 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       body.tool_choice = this.toChatToolChoice(options.tool_choice) ?? 'auto'
     }
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const res = await this.fetchWithRetry(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
     })
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText)
-      throw new Error(`LLM API 错误 (${res.status}): ${err.substring(0, 500)}`)
-    }
 
     const text = await res.text()
     if (!text) {
@@ -119,16 +117,11 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     if (options.maxTokens != null) body.max_tokens = options.maxTokens
     if (options.responseFormat === 'json') body.response_format = { type: 'json_object' }
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const res = await this.fetchStreamWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
     })
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText)
-      throw new Error(`LLM stream 错误 (${res.status}): ${err.substring(0, 500)}`)
-    }
 
     yield* this.parseSSE(res, (parsed) => {
       const choices = parsed.choices as Array<Record<string, unknown>> | undefined
@@ -205,16 +198,11 @@ export class OpenAIAdapter implements LLMProviderAdapter {
   private async chatResponses(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
     const body = this.buildResponsesInput(options)
 
-    const res = await fetch(`${this.baseUrl}/responses`, {
+    const res = await this.fetchWithRetry(`${this.baseUrl}/responses`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
     })
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText)
-      throw new Error(`Responses API 错误 (${res.status}): ${err.substring(0, 500)}`)
-    }
 
     const data = await res.json() as Record<string, unknown>
     const result = this.parseResponsesResult(data)
@@ -276,16 +264,11 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     const body = this.buildResponsesInput(options)
     body.stream = true
 
-    const res = await fetch(`${this.baseUrl}/responses`, {
+    const res = await this.fetchStreamWithTimeout(`${this.baseUrl}/responses`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
     })
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText)
-      throw new Error(`Responses stream 错误 (${res.status}): ${err.substring(0, 500)}`)
-    }
 
     yield* this.parseSSE(res, (parsed) => {
       if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
@@ -302,6 +285,89 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       content += chunk.content
     }
     return content
+  }
+
+  // ==================== 带重试和超时的 fetch ====================
+
+  /**
+   * 带超时的 fetch
+   */
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal })
+      return res
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new Error(`LLM 请求超时 (${timeoutMs}ms, model: ${this.model})`)
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * 带重试的非流式请求
+   */
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    const { maxRetries, timeoutMs } = this.retryConfig
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await this.fetchWithTimeout(url, init, timeoutMs)
+
+        if (res.ok) return res
+
+        // 可重试的状态码
+        if (isRetryableStatus(res.status) && attempt < maxRetries) {
+          // 429 时尝试读取 Retry-After
+          let delay = computeBackoff(attempt, this.retryConfig)
+          const retryAfter = res.headers.get('Retry-After')
+          if (retryAfter) {
+            const retryMs = parseInt(retryAfter, 10) * 1000
+            if (!isNaN(retryMs) && retryMs > 0) delay = Math.min(retryMs, this.retryConfig.maxDelayMs)
+          }
+
+          console.warn(`[LLM] ${res.status} 重试 ${attempt + 1}/${maxRetries}，等待 ${delay}ms (model: ${this.model})`)
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+
+        // 不可重试的错误，直接抛出
+        const errText = await res.text().catch(() => res.statusText)
+        throw new Error(`LLM API 错误 (${res.status}): ${errText.substring(0, 500)}`)
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+
+        // 网络错误（非 HTTP 错误）也可重试
+        if (attempt < maxRetries && !(lastError.message.includes('LLM API 错误'))) {
+          const delay = computeBackoff(attempt, this.retryConfig)
+          console.warn(`[LLM] 网络错误重试 ${attempt + 1}/${maxRetries}，等待 ${delay}ms: ${lastError.message}`)
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+
+        throw lastError
+      }
+    }
+
+    throw lastError ?? new Error('LLM 请求失败')
+  }
+
+  /**
+   * 带超时的流式请求（不重试，因为流式请求可能已经部分消费）
+   */
+  private async fetchStreamWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const res = await this.fetchWithTimeout(url, init, this.retryConfig.streamTimeoutMs)
+    if (!res.ok) {
+      const err = await res.text().catch(() => res.statusText)
+      throw new Error(`LLM stream 错误 (${res.status}): ${err.substring(0, 500)}`)
+    }
+    return res
   }
 
   // ==================== SSE 解析器 ====================

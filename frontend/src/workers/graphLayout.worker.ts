@@ -68,6 +68,7 @@ interface LayoutNode {
 /** 力导向布局算法核心类 */
 class ForceDirectedLayout {
   private nodes: LayoutNode[] = []
+  private nodeMap = new Map<string, LayoutNode>()
   private edges: MemoryEdge[] = []
   private options: Required<LayoutOptions>
   private running = false
@@ -148,9 +149,6 @@ class ForceDirectedLayout {
    * 使用简化的BFS算法
    */
   private calculateNodeLevels(): void {
-    const nodeMap = new Map<string, LayoutNode>()
-    this.nodes.forEach(n => nodeMap.set(n.id, n))
-
     // 构建邻接表
     const adjacency = new Map<string, string[]>()
     for (const node of this.nodes) {
@@ -204,7 +202,10 @@ class ForceDirectedLayout {
   private iterate(): number {
     const { repulsion, attraction, damping, maxMove } = this.options
 
-    // 1. 计算排斥力（所有节点两两之间）
+    // 排斥力截断距离：超过此距离的节点对跳过计算
+    const CUTOFF_DIST = Math.sqrt(repulsion) * 3
+
+    // 1. 计算排斥力（所有节点两两之间，带距离截断）
     for (let i = 0; i < this.nodes.length; i++) {
       for (let j = i + 1; j < this.nodes.length; j++) {
         const nodeA = this.nodes[i]
@@ -212,7 +213,14 @@ class ForceDirectedLayout {
 
         const dx = nodeB.x - nodeA.x
         const dy = nodeB.y - nodeA.y
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+
+        // 快速距离截断：先用曼哈顿距离粗筛
+        if (Math.abs(dx) > CUTOFF_DIST || Math.abs(dy) > CUTOFF_DIST) continue
+
+        const distSq = dx * dx + dy * dy
+        if (distSq > CUTOFF_DIST * CUTOFF_DIST) continue
+
+        const dist = Math.sqrt(distSq) || 1
 
         // 库仑力：F = k / d^2
         const force = repulsion / (dist * dist)
@@ -227,10 +235,10 @@ class ForceDirectedLayout {
       }
     }
 
-    // 2. 计算吸引力（边连接的节点）
+    // 2. 计算吸引力（边连接的节点，使用 Map O(1) 查找）
     for (const edge of this.edges) {
-      const source = this.nodes.find(n => n.id === edge.sourceId)
-      const target = this.nodes.find(n => n.id === edge.targetId)
+      const source = this.nodeMap.get(edge.sourceId)
+      const target = this.nodeMap.get(edge.targetId)
       if (!source || !target) continue
 
       const dx = target.x - source.x
@@ -291,6 +299,12 @@ class ForceDirectedLayout {
       height: 80, // 默认节点高度
     }))
     this.edges = edges
+
+    // 构建 id → node 的 Map，加速吸引力计算中的查找
+    this.nodeMap.clear()
+    for (const node of this.nodes) {
+      this.nodeMap.set(node.id, node)
+    }
 
     // 如果节点位置都是0，使用初始化位置
     const hasValidPositions = this.nodes.some(n => n.x !== 0 || n.y !== 0)

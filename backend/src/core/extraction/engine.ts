@@ -6,6 +6,17 @@ import { broadcast } from '../../ws/server.js'
 import type { DifficultyType, NodeExtractedPayload, ExtractionDonePayload } from '../../types/index.js'
 
 /**
+ * 归一化标题用于去重比较：去除空格、标点、转小写
+ */
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[\s\-_.,;:!?'"()[\]{}\/\\]/g, '')
+    .replace(/[，。；：！？、""''（）【】《》]/g, '')
+    .trim()
+}
+
+/**
  * 自动从 Agent 输出中提取约束/知识节点，逐个广播给前端
  */
 export async function autoExtractNodes(
@@ -35,9 +46,16 @@ ${agentResult.substring(0, 2000)}
 ${existingSummary.length > 0 ? JSON.stringify(existingSummary) : '无'}
 
 要求:
-- 只提取有价值的知识点，不要提取闲聊内容
-- 如果对话中没有值得记忆的知识，返回空 nodes 数组
-- 每个知识点一个节点，可以有多个节点
+- 只在以下三种情况创建新节点：
+  1. 对话中出现了新功能、新概念、新技术方案
+  2. 用户提出了新的约束条件、规则或限制
+  3. 讨论过程中产生了新的知识发现或洞察
+- 以下情况不应创建节点：
+  - 简单问答、闲聊、确认性回复
+  - 已有节点已经覆盖的知识（注意检查已有节点列表，避免重复）
+  - 临时性的调试信息、错误排查过程
+- 如果对话中没有值得记忆的知识，必须返回空 nodes 数组
+- 每个知识点一个节点，标题必须与已有节点的标题有明显区分
 - 与已有节点有关联的要建 existingNodeEdges
 
 请严格按以下 JSON 格式返回:
@@ -87,10 +105,33 @@ ${existingSummary.length > 0 ? JSON.stringify(existingSummary) : '无'}
 
     const positions = sugiyamaLayout(layoutNodes, layoutEdges, { originX, originY })
 
-    // 逐个创建节点并广播
+    // 逐个创建节点并广播（带标题去重）
     const tempIdToRealId = new Map<string, string>()
+    const existingTitlesNormalized = existingNodes.map(n => normalizeTitle(n.title))
+
     for (let i = 0; i < parsed.nodes.length; i++) {
       const n = parsed.nodes[i]
+
+      // 标题去重：与已有节点标题归一化比较
+      const newTitleNorm = normalizeTitle(n.title)
+      const isDuplicate = existingTitlesNormalized.some(existing =>
+        existing === newTitleNorm || existing.includes(newTitleNorm) || newTitleNorm.includes(existing)
+      )
+      if (isDuplicate) {
+        console.log(`[extraction] 跳过重复节点: "${n.title}"`)
+        continue
+      }
+
+      // 也检查本批次内的重复
+      const batchTitles = Array.from(tempIdToRealId.keys())
+        .map(tid => parsed.nodes.find((pn: any) => pn.tempId === tid)?.title)
+        .filter(Boolean)
+        .map((t: string) => normalizeTitle(t))
+      if (batchTitles.some((bt: string) => bt === newTitleNorm || bt.includes(newTitleNorm) || newTitleNorm.includes(bt))) {
+        console.log(`[extraction] 跳过批次内重复节点: "${n.title}"`)
+        continue
+      }
+
       const pos = positions.get(n.tempId) ?? { x: originX + i * 250, y: originY }
       const created = createNode({
         brainId,
