@@ -37,12 +37,12 @@ taskRouter.post('/execute', async (req, res) => {
     }
 
     const tools = Array.isArray(enabledTools) ? enabledTools as string[] : undefined
+    const wasRunning = orchestrator.running
     const item = await orchestrator.enqueue('task', prompt, brainId, execMode, tools)
-    const queued = orchestrator.running
     res.json({
-      status: queued ? 'queued' : 'started',
+      status: wasRunning ? 'queued' : 'started',
       queueItemId: item.id,
-      message: queued ? '任务已加入队列' : '任务已开始执行',
+      message: wasRunning ? '任务已加入队列' : '任务已开始执行',
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)

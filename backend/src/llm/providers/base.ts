@@ -25,7 +25,7 @@ export interface ChatCompletionOptions {
   stream?: boolean
   responseFormat?: 'json' | 'text'
   tools?: OpenAIToolDef[]
-  tool_choice?: 'auto' | 'none'
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } } | { type: 'function'; name: string }
 }
 
 export interface ChatCompletionResult {

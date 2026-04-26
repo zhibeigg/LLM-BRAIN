@@ -12,6 +12,7 @@ export abstract class LLMRoleBase {
     userMessage: string,
     context?: ChatMessage[],
     tools?: OpenAIToolDef[],
+    toolChoice?: Parameters<import('../providers/base.js').LLMProviderAdapter['chat']>[0]['tool_choice'],
   ): Promise<ChatCompletionResult> {
     const config = getRoleConfig(this.role)
     if (!config) throw new Error(`角色 ${this.role} 未配置 LLM`)
@@ -27,15 +28,18 @@ export abstract class LLMRoleBase {
       messages,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
-      responseFormat: this.jsonMode ? 'json' : undefined,
+      responseFormat: this.jsonMode && (!tools || tools.length === 0) ? 'json' : undefined,
       tools: tools && tools.length > 0 ? tools : undefined,
+      tool_choice: toolChoice,
     })
+
   }
 
   /** 带完整消息列表的 chat（用于工具调用循环） */
   async chatWithMessages(
     messages: ChatMessage[],
     tools?: OpenAIToolDef[],
+    toolChoice?: Parameters<import('../providers/base.js').LLMProviderAdapter['chat']>[0]['tool_choice'],
   ): Promise<ChatCompletionResult> {
     const config = getRoleConfig(this.role)
     if (!config) throw new Error(`角色 ${this.role} 未配置 LLM`)
@@ -46,20 +50,26 @@ export abstract class LLMRoleBase {
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       tools: tools && tools.length > 0 ? tools : undefined,
+      tool_choice: toolChoice,
     })
   }
 
   async *chatStream(userMessage: string, context?: ChatMessage[]): AsyncGenerator<StreamChunk> {
-    const config = getRoleConfig(this.role)
-    if (!config) throw new Error(`角色 ${this.role} 未配置 LLM`)
-
-    const adapter = getAdapter(config.providerId, config.model)
     const messages: ChatMessage[] = [
       { role: 'system', content: this.systemPrompt },
       ...(context ?? []),
       { role: 'user', content: userMessage },
     ]
 
+    yield* this.chatStreamWithMessages(messages)
+  }
+
+  /** 带完整消息列表的流式 chat（用于工具调用后的最终回答） */
+  async *chatStreamWithMessages(messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+    const config = getRoleConfig(this.role)
+    if (!config) throw new Error(`角色 ${this.role} 未配置 LLM`)
+
+    const adapter = getAdapter(config.providerId, config.model)
     yield* adapter.chatStream({
       messages,
       temperature: config.temperature,

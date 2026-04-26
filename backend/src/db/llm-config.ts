@@ -1,10 +1,12 @@
 import { v4 as uuidv4 } from 'uuid'
 import { getDb } from './database.js'
-import type { LLMProvider, LLMRole, LLMRoleConfig } from '../types/index.js'
+import type { LLMApiMode, LLMProvider, LLMProviderType, LLMRole, LLMRoleConfig } from '../types/index.js'
 
 interface ProviderRow {
   id: string
   name: string
+  provider_type?: string
+  api_mode?: string
   base_url: string
   api_key: string
   models: string
@@ -18,10 +20,23 @@ interface RoleConfigRow {
   max_tokens: number
 }
 
+function normalizeProviderType(value: string | undefined): LLMProviderType {
+  return value === 'anthropic' ? 'anthropic' : 'openai'
+}
+
+function normalizeApiMode(value: string | undefined, providerType: LLMProviderType): LLMApiMode {
+  if (providerType === 'anthropic') return 'anthropic-messages'
+  if (value === 'openai-chat' || value === 'openai-responses') return value
+  return 'auto'
+}
+
 function rowToProvider(row: ProviderRow): LLMProvider {
+  const providerType = normalizeProviderType(row.provider_type)
   return {
     id: row.id,
     name: row.name,
+    providerType,
+    apiMode: normalizeApiMode(row.api_mode, providerType),
     baseUrl: row.base_url,
     apiKey: row.api_key,
     models: JSON.parse(row.models) as string[],
@@ -61,11 +76,19 @@ export function createProvider(
   const id = uuidv4()
 
   const stmt = db.prepare(`
-    INSERT INTO llm_providers (id, name, base_url, api_key, models)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO llm_providers (id, name, provider_type, api_mode, base_url, api_key, models)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
 
-  stmt.run(id, provider.name, provider.baseUrl, provider.apiKey, JSON.stringify(provider.models))
+  stmt.run(
+    id,
+    provider.name,
+    provider.providerType,
+    provider.apiMode,
+    provider.baseUrl,
+    provider.apiKey,
+    JSON.stringify(provider.models),
+  )
 
   return { id, ...provider }
 }
@@ -84,6 +107,14 @@ export function updateProvider(
   if (updates.name !== undefined) {
     fields.push('name = ?')
     values.push(updates.name)
+  }
+  if (updates.providerType !== undefined) {
+    fields.push('provider_type = ?')
+    values.push(updates.providerType)
+  }
+  if (updates.apiMode !== undefined) {
+    fields.push('api_mode = ?')
+    values.push(updates.apiMode)
   }
   if (updates.baseUrl !== undefined) {
     fields.push('base_url = ?')

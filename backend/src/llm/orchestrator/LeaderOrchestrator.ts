@@ -1,4 +1,5 @@
 import type { ExecutionMode, PersonalityDimension, DifficultyPersonalityMapping, MemoryNode } from '../../types/index.js'
+import type { OpenAIToolDef } from '../providers/base.js'
 import { broadcast } from '../../ws/server.js'
 import { randomUUID } from 'crypto'
 import { LeaderRole } from '../roles/leader.js'
@@ -13,6 +14,41 @@ import type { LeaderStepPayload, LeaderDecisionPayload, StepConfirmPayload, LLMT
  * 路径难度调整器
  * 职责：根据执行结果调整路径上边的难度
  */
+function buildLeaderDecisionTool(validEdgeIds: string[]): OpenAIToolDef {
+  return {
+    type: 'function',
+    function: {
+      name: 'choose_leader_path',
+      description: '选择 Leader 在记忆图中的下一步路径，或在记忆已足够时停止。必须只从候选 edgeId 中选择。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['continue', 'stop'],
+            description: '继续沿候选边前进，或停止路径收集。',
+          },
+          edgeId: {
+            type: ['string', 'null'],
+            enum: [...validEdgeIds, null],
+            description: 'action 为 continue 时必须是候选边 ID；action 为 stop 时必须为 null。',
+          },
+          reason: {
+            type: 'string',
+            description: '一句话说明选择理由。',
+          },
+          thinking: {
+            type: 'string',
+            description: '简短分析当前节点、候选路径和任务相关性。',
+          },
+        },
+        required: ['action', 'edgeId', 'reason', 'thinking'],
+      },
+    },
+  }
+}
+
 export class DifficultyAdjuster {
   /**
    * 调整路径难度
@@ -123,7 +159,13 @@ export class LeaderOrchestrator {
       })
 
       const startTime = Date.now()
-      const leaderResult = await this.leader.chat(leaderInput)
+      const leaderTool = buildLeaderDecisionTool(candidates.map(c => c.edge.id))
+      const leaderResult = await this.leader.chat(
+        leaderInput,
+        undefined,
+        [leaderTool],
+        { type: 'function', function: { name: 'choose_leader_path' } }
+      )
       const latencyMs = Date.now() - startTime
       let decision: { action: string; edgeId: string | null; reason: string; thinking: string }
 
@@ -159,31 +201,66 @@ export class LeaderOrchestrator {
         return { action, edgeId, reason, thinking }
       }
 
-      try {
-        decision = parseLeaderDecision(JSON.parse(leaderResult.content))
-      } catch {
-        const cleaned = leaderResult.content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
-        const jsonMatch = cleaned.match(/\{[\s\S]*?\}/)
-        if (jsonMatch) {
-          try { decision = parseLeaderDecision(JSON.parse(jsonMatch[0])) }
-          catch {
-            // JSON 解析彻底失败，fallback：选第一个未访问的候选
-            const fallback = candidates.find(c => !visitedPath.includes(c.edge.targetId)) ?? candidates[0]
-            decision = {
-              action: fallback ? 'continue' : 'stop',
-              edgeId: fallback?.edge.id ?? null,
-              reason: 'Leader 返回格式错误，自动选择路径',
-              thinking: leaderResult.content,
-            }
-          }
-        } else {
+      const parseDecisionText = (content: string): typeof decision | null => {
+        try {
+          return parseLeaderDecision(JSON.parse(content))
+        } catch {
+          const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+          const jsonMatch = cleaned.match(/\{[\s\S]*?\}/)
+          if (!jsonMatch) return null
+          try { return parseLeaderDecision(JSON.parse(jsonMatch[0])) }
+          catch { return null }
+        }
+      }
+
+      const leaderToolCall = leaderResult.tool_calls?.find(tc => tc.function.name === 'choose_leader_path')
+      if (leaderToolCall) {
+        try {
+          decision = parseLeaderDecision(JSON.parse(leaderToolCall.function.arguments))
+        } catch {
           const fallback = candidates.find(c => !visitedPath.includes(c.edge.targetId)) ?? candidates[0]
           decision = {
             action: fallback ? 'continue' : 'stop',
             edgeId: fallback?.edge.id ?? null,
-            reason: 'Leader 返回非 JSON，自动选择路径',
-            thinking: leaderResult.content,
+            reason: 'Leader 工具参数解析失败，自动选择路径',
+            thinking: leaderToolCall.function.arguments,
           }
+        }
+      } else {
+        const textDecision = parseDecisionText(leaderResult.content)
+        if (textDecision) {
+          decision = textDecision
+        } else {
+          const jsonRetryPrompt = `${leaderInput}\n\n你的上一次输出没有调用决策工具。现在必须只返回一个 JSON 对象，不要解释、不要 markdown。格式：{"action":"continue或stop","edgeId":"候选edgeId或null","reason":"一句话理由","thinking":"简短分析"}`
+          const retryResult = await this.leader.chat(jsonRetryPrompt)
+          const retryDecision = parseDecisionText(retryResult.content)
+          if (retryDecision) {
+            decision = retryDecision
+            leaderResult.content = retryResult.content
+            leaderResult.model = retryResult.model ?? leaderResult.model
+            leaderResult.usage = retryResult.usage ?? leaderResult.usage
+          } else {
+            const fallback = candidates.find(c => !visitedPath.includes(c.edge.targetId)) ?? candidates[0]
+            decision = {
+              action: fallback ? 'continue' : 'stop',
+              edgeId: fallback?.edge.id ?? null,
+              reason: 'Leader 未返回可解析决策，自动选择路径',
+              thinking: `${leaderResult.content}\n\nJSON重试：${retryResult.content}`,
+            }
+          }
+        }
+      }
+
+      const validEdgeIds = new Set(candidates.map(c => c.edge.id))
+      if (decision.action === 'stop') {
+        decision.edgeId = null
+      } else if (!decision.edgeId || !validEdgeIds.has(decision.edgeId)) {
+        const fallback = candidates.find(c => !visitedPath.includes(c.edge.targetId)) ?? candidates[0]
+        decision = {
+          action: fallback ? 'continue' : 'stop',
+          edgeId: fallback?.edge.id ?? null,
+          reason: 'Leader 决策边无效，自动选择有效候选路径',
+          thinking: decision.thinking,
         }
       }
 
@@ -191,7 +268,7 @@ export class LeaderOrchestrator {
       const leaderTrace: LLMTrace = {
         model: leaderResult.model,
         prompt: leaderInput,
-        rawResponse: leaderResult.content,
+        rawResponse: leaderToolCall?.function.arguments ?? leaderResult.content,
         latencyMs,
         ...(leaderResult.usage ? { tokenUsage: { prompt: leaderResult.usage.promptTokens, completion: leaderResult.usage.completionTokens } } : {}),
       }

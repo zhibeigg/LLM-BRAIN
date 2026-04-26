@@ -151,10 +151,10 @@ function MainApp() {
   const [leftWidth, setLeftWidth] = useState(LEFT_WIDTH)
   const [graphWidth, setGraphWidth] = useState(480)
 
-  // 登录后加载历史会话
+  // 登录后或切换大脑时加载历史会话
   useEffect(() => {
     loadSessions()
-  }, [loadSessions])
+  }, [loadSessions, currentBrainId])
 
   const handleLeftDrag = useCallback((delta: number) => {
     setLeftWidth(prev => Math.max(LEFT_MIN, Math.min(LEFT_MAX, prev + delta)))
@@ -170,13 +170,8 @@ function MainApp() {
   }, [])
 
   // 离线状态检测和显示
-  const [showOfflinePage, setShowOfflinePage] = useState(false)
+  const [showOfflinePage, setShowOfflinePage] = useState(() => !navigator.onLine)
   useEffect(() => {
-    // 初始检查
-    if (!navigator.onLine) {
-      setShowOfflinePage(true)
-    }
-
     const handleOffline = () => setShowOfflinePage(true)
     const handleOnline = () => setShowOfflinePage(false)
 

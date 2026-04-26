@@ -66,17 +66,24 @@ export class Orchestrator {
     if (mode) this._mode = mode
     if (enabledTools) this._enabledTools = enabledTools
 
-    const item = await this.taskQueue.enqueue(type, prompt, brainId)
+    const item: import('../../types/index.js').QueueItem = {
+      id: randomUUID(),
+      type,
+      prompt,
+      brainId,
+      createdAt: Date.now(),
+    }
 
     const release = await this.mutex.acquire()
     try {
       if (!this.taskQueue.isRunning) {
-        // 异步运行，不阻塞
+        // 空闲时直接执行，不把当前任务显示为“排队中”
         this._runItem(item).catch(err => {
           console.error('Queue item execution error:', err)
         })
+      } else {
+        await this.taskQueue.enqueueItem(item)
       }
-      // else: 已在 enqueue 中加入了队列
     } finally {
       release()
     }

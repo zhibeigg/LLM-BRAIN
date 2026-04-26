@@ -29,6 +29,7 @@ import { DIFFICULTY_TYPE_LABELS, type DifficultyType } from '../../types'
 import { MemoryNodeComponent } from './MemoryNodeComponent'
 import { AnimatedEdge } from './AnimatedEdge'
 import { ContextMenu } from './ContextMenu'
+import { GraphSignalOverlay } from './GraphSignalOverlay'
 
 import { useColors, useThemeMode } from '../../ThemeContext'
 import { useResponsive } from '../../hooks/useResponsive'
@@ -697,9 +698,11 @@ function GraphCanvasInner() {
         defaultViewport={{ x: 0, y: 0, zoom: isMobile ? 0.6 : 0.8 }}
         minZoom={0.2}
         maxZoom={2}
-        // 移动端触摸缩放
+        // 滚轮缩放，拖拽平移
+        zoomOnScroll={true}
         zoomOnPinch={true}
-        panOnScroll={!isMobile}
+        panOnScroll={false}
+        panOnDrag={true}
         // 移动端拖拽
         draggable={!isMobile}
         // 移动端双击缩放
@@ -726,6 +729,7 @@ function GraphCanvasInner() {
           variant={graphSnapToGrid ? BackgroundVariant.Lines : BackgroundVariant.Dots}
         />
         <ChineseControls onAutoLayout={handleAutoLayout} isLayouting={isLayouting} isMobile={isMobile} />
+        <GraphSignalOverlay />
         {/* 视窗状态指示器 */}
         <Box
           sx={{

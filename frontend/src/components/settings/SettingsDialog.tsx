@@ -15,7 +15,7 @@ import {
   Update as UpdateIcon,
 } from '@mui/icons-material'
 import { llmApi, toolsApi } from '../../services/api'
-import type { LLMProvider, LLMRoleConfig, LLMRole, ToolDefinition } from '../../types'
+import type { LLMApiMode, LLMProvider, LLMProviderType, LLMRoleConfig, LLMRole, ToolDefinition } from '../../types'
 import { LLM_ROLE_LABELS } from '../../types'
 import { useColors, useThemeMode } from '../../ThemeContext'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -28,7 +28,7 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-const ALL_ROLES: LLMRole[] = ['leader', 'agent', 'boss', 'evaluator', 'personality_parser']
+const ALL_ROLES: LLMRole[] = ['leader', 'agent', 'boss', 'evaluator', 'personality_parser', 'scholar']
 
 // 设置选项常量
 const FONT_OPTIONS: { value: FontFamily; label: string }[] = [
@@ -42,6 +42,18 @@ const EXEC_MODE_OPTIONS: { value: ExecutionMode; label: string; desc: string }[]
   { value: 'plan', label: '计划', desc: '先生成计划，确认后执行' },
   { value: 'supervised', label: '监督', desc: '每一步都需要确认' },
   { value: 'readonly', label: '只读', desc: '仅展示思考过程，不执行' },
+]
+
+const PROVIDER_TYPE_OPTIONS: { value: LLMProviderType; label: string; defaultBaseUrl: string }[] = [
+  { value: 'openai', label: 'OpenAI / GPT 兼容', defaultBaseUrl: 'https://api.openai.com/v1' },
+  { value: 'anthropic', label: 'Anthropic / Claude', defaultBaseUrl: 'https://api.anthropic.com' },
+]
+
+const API_MODE_OPTIONS: { value: LLMApiMode; label: string; providerType: LLMProviderType }[] = [
+  { value: 'auto', label: '自动选择', providerType: 'openai' },
+  { value: 'openai-chat', label: 'Chat Completions', providerType: 'openai' },
+  { value: 'openai-responses', label: 'Responses API', providerType: 'openai' },
+  { value: 'anthropic-messages', label: 'Messages API', providerType: 'anthropic' },
 ]
 
 /** 更新检查组件 */
@@ -112,8 +124,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [tools, setTools] = useState<ToolDefinition[]>([])
 
   const [editingProvider, setEditingProvider] = useState<Partial<LLMProvider> | null>(null)
-  const [providerForm, setProviderForm] = useState({
-    name: '', baseUrl: '', apiKey: '', models: '',
+  const [providerForm, setProviderForm] = useState<{
+    name: string
+    providerType: LLMProviderType
+    apiMode: LLMApiMode
+    baseUrl: string
+    apiKey: string
+    models: string
+  }>({
+    name: '', providerType: 'openai', apiMode: 'auto', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: '',
   })
 
   const [detecting, setDetecting] = useState<string | null>(null)
@@ -141,15 +160,22 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   }, [open, fetchData])
 
   const resetProviderForm = () => {
-    setProviderForm({ name: '', baseUrl: '', apiKey: '', models: '' })
+    setProviderForm({
+      name: '', providerType: 'openai', apiMode: 'auto',
+      baseUrl: 'https://api.openai.com/v1', apiKey: '', models: '',
+    })
     setEditingProvider(null)
   }
 
   const handleEditProvider = (provider: LLMProvider) => {
     setEditingProvider(provider)
     setProviderForm({
-      name: provider.name, baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey, models: provider.models.join(', '),
+      name: provider.name,
+      providerType: provider.providerType,
+      apiMode: provider.apiMode,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      models: provider.models.join(', '),
     })
   }
 
@@ -160,8 +186,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     }
     const models = providerForm.models.split(',').map((m) => m.trim()).filter(Boolean)
     const data = {
-      name: providerForm.name.trim(), baseUrl: providerForm.baseUrl.trim(),
-      apiKey: providerForm.apiKey.trim(), models,
+      name: providerForm.name.trim(),
+      providerType: providerForm.providerType,
+      apiMode: providerForm.apiMode,
+      baseUrl: providerForm.baseUrl.trim(),
+      apiKey: providerForm.apiKey.trim(),
+      models,
     }
     try {
       if (editingProvider?.id) {
@@ -209,7 +239,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setDetecting('form')
     try {
       const result = await llmApi.detectModelsWithCredentials(
-        providerForm.baseUrl.trim(), providerForm.apiKey.trim(),
+        providerForm.baseUrl.trim(), providerForm.apiKey.trim(), providerForm.providerType,
       )
       setProviderForm((f) => ({ ...f, models: result.models.join(', ') }))
       showMessage(`检测到 ${result.count} 个模型，已自动填入`)
@@ -483,6 +513,35 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     <TextField label="名称" size="small" value={providerForm.name}
                       onChange={(e) => setProviderForm((f) => ({ ...f, name: e.target.value }))}
                       placeholder="OpenAI / Claude / DeepSeek ..." fullWidth />
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>供应商类型</InputLabel>
+                        <Select value={providerForm.providerType} label="供应商类型"
+                          onChange={(e) => {
+                            const providerType = e.target.value as LLMProviderType
+                            const option = PROVIDER_TYPE_OPTIONS.find((item) => item.value === providerType)
+                            setProviderForm((f) => ({
+                              ...f,
+                              providerType,
+                              apiMode: providerType === 'anthropic' ? 'anthropic-messages' : 'auto',
+                              baseUrl: option?.defaultBaseUrl ?? f.baseUrl,
+                            }))
+                          }}>
+                          {PROVIDER_TYPE_OPTIONS.map((option) => (
+                            <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>API 模式</InputLabel>
+                        <Select value={providerForm.apiMode} label="API 模式"
+                          onChange={(e) => setProviderForm((f) => ({ ...f, apiMode: e.target.value as LLMApiMode }))}>
+                          {API_MODE_OPTIONS.filter((option) => option.providerType === providerForm.providerType).map((option) => (
+                            <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Box>
                     <TextField label="Base URL" size="small" value={providerForm.baseUrl}
                       onChange={(e) => setProviderForm((f) => ({ ...f, baseUrl: e.target.value }))}
                       placeholder="https://api.openai.com/v1" fullWidth />
@@ -522,6 +581,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                               <Typography variant="body1" sx={{ fontWeight: 500, color: c.text }}>
                                 {provider.name}
                               </Typography>
+                              <Chip label={provider.providerType === 'anthropic' ? 'Anthropic' : 'OpenAI'} size="small"
+                                sx={{ height: 22, fontSize: 12, bgcolor: `${c.secondary}15`, color: c.secondary, border: `1px solid ${c.secondary}30` }} />
+                              <Chip label={provider.apiMode} size="small"
+                                sx={{ height: 22, fontSize: 12, bgcolor: `${c.primary}10`, color: c.textMuted, border: `1px solid ${c.border}` }} />
                               <Chip label={`${provider.models.length} 个模型`} size="small"
                                 sx={{
                                   height: 22, fontSize: 12,
@@ -565,7 +628,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   ))}
                   {providers.length === 0 && (
                     <Alert severity="info">
-                      暂无提供商。请填写上方表单添加一个 LLM 提供商（支持 OpenAI 兼容接口）。
+                      暂无提供商。请填写上方表单添加一个 LLM 提供商（支持 OpenAI/GPT 兼容接口或 Anthropic/Claude）。
                     </Alert>
                   )}
                 </List>

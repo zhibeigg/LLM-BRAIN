@@ -1,18 +1,25 @@
+import type { LLMApiMode } from '../../types/index.js'
 import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, StreamChunk } from './base.js'
 
 export class OpenAIAdapter implements LLMProviderAdapter {
   private baseUrl: string
   private apiKey: string
   private model: string
+  private apiMode: LLMApiMode
 
-  constructor(baseUrl: string, apiKey: string, model: string) {
-    this.baseUrl = baseUrl
+  constructor(baseUrl: string, apiKey: string, model: string, apiMode: LLMApiMode = 'auto') {
+    this.baseUrl = baseUrl.replace(/\/$/, '')
     this.apiKey = apiKey
     this.model = model
+    this.apiMode = apiMode
   }
 
-  private get isCodex(): boolean {
-    return this.model.includes('codex')
+  private get useResponsesApi(): boolean {
+    if (this.apiMode === 'openai-responses') return true
+    if (this.apiMode === 'openai-chat') return false
+
+    const model = this.model.toLowerCase()
+    return model.includes('codex') || model.startsWith('gpt-5') || /^o\d/.test(model)
   }
 
   private get headers(): Record<string, string> {
@@ -22,14 +29,27 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     }
   }
 
+  private toChatToolChoice(toolChoice: ChatCompletionOptions['tool_choice']) {
+    if (!toolChoice || toolChoice === 'auto' || toolChoice === 'none' || toolChoice === 'required') return toolChoice
+    if ('function' in toolChoice) return toolChoice
+    return { type: 'function', function: { name: toolChoice.name } }
+  }
+
+  private toResponsesToolChoice(toolChoice: ChatCompletionOptions['tool_choice']) {
+    if (!toolChoice || toolChoice === 'auto' || toolChoice === 'none' || toolChoice === 'required') return toolChoice
+    // 部分 Responses 兼容服务只接受字符串 tool_choice。
+    // Leader 只传一个工具，因此 required 等价于强制调用该工具。
+    return 'required'
+  }
+
   // ==================== 统一入口 ====================
 
   async chat(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
-    return this.isCodex ? this.chatCodex(options) : this.chatStandard(options)
+    return this.useResponsesApi ? this.chatResponses(options) : this.chatStandard(options)
   }
 
   async *chatStream(options: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
-    yield* this.isCodex ? this.streamCodex(options) : this.streamStandard(options)
+    yield* this.useResponsesApi ? this.streamResponses(options) : this.streamStandard(options)
   }
 
   // ==================== 标准 Chat Completions ====================
@@ -45,7 +65,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     if (options.responseFormat === 'json') body.response_format = { type: 'json_object' }
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools
-      body.tool_choice = options.tool_choice ?? 'auto'
+      body.tool_choice = this.toChatToolChoice(options.tool_choice) ?? 'auto'
     }
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -56,12 +76,11 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText)
-      throw new Error(`LLM API 错误 (${res.status}): ${err.substring(0, 300)}`)
+      throw new Error(`LLM API 错误 (${res.status}): ${err.substring(0, 500)}`)
     }
 
     const text = await res.text()
     if (!text) {
-      // 回退到流式拼接
       let content = ''
       for await (const chunk of this.streamStandard(options)) content += chunk.content
       if (!content) throw new Error(`LLM 返回空响应 (model: ${this.model})`)
@@ -72,7 +91,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     const choice = data.choices?.[0]
     if (!choice) throw new Error(`LLM 返回无 choices (model: ${this.model})`)
 
-    return {
+    const result: ChatCompletionResult = {
       content: choice.message?.content ?? '',
       model: this.model,
       tool_calls: choice.message?.tool_calls ?? undefined,
@@ -82,6 +101,12 @@ export class OpenAIAdapter implements LLMProviderAdapter {
         totalTokens: data.usage.total_tokens,
       } : undefined,
     }
+
+    if (!result.content && !result.tool_calls) {
+      result.content = await this.collectStreamContent(() => this.streamStandard(options))
+    }
+
+    return result
   }
 
   private async *streamStandard(options: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
@@ -92,6 +117,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     }
     if (options.temperature != null) body.temperature = options.temperature
     if (options.maxTokens != null) body.max_tokens = options.maxTokens
+    if (options.responseFormat === 'json') body.response_format = { type: 'json_object' }
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -101,7 +127,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText)
-      throw new Error(`LLM stream 错误 (${res.status}): ${err.substring(0, 300)}`)
+      throw new Error(`LLM stream 错误 (${res.status}): ${err.substring(0, 500)}`)
     }
 
     yield* this.parseSSE(res, (parsed) => {
@@ -115,11 +141,10 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     })
   }
 
-  // ==================== Codex Responses API ====================
+  // ==================== Responses API ====================
 
   private buildResponsesInput(options: ChatCompletionOptions) {
-    // 将 chat messages 转换为 responses API 的 input 格式
-    let instructions = options.messages
+    const instructions = options.messages
       .filter(m => m.role === 'system')
       .map(m => m.content)
       .join('\n')
@@ -130,17 +155,13 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       if (m.role === 'system') continue
 
       if (m.role === 'tool' && m.tool_call_id) {
-        // 工具结果消息
         input.push({
           type: 'function_call_output',
           call_id: m.tool_call_id,
           output: m.content,
         })
       } else if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
-        // assistant 消息中包含 tool_calls → 转为 function_call items
-        if (m.content) {
-          input.push({ role: 'assistant', content: m.content })
-        }
+        if (m.content) input.push({ role: 'assistant', content: m.content })
         for (const tc of m.tool_calls) {
           input.push({
             type: 'function_call',
@@ -154,24 +175,20 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       }
     }
 
-    // Codex 要求 input 中包含 "json" 才能使用 json_object 格式
     if (options.responseFormat === 'json') {
       const hasJsonInInput = input.some((m) => typeof m.content === 'string' && m.content.toLowerCase().includes('json'))
-      if (!hasJsonInInput) {
-        input.push({ role: 'user', content: '请以 JSON 格式回复。' })
-      }
+      if (!hasJsonInInput) input.push({ role: 'user', content: '请以 JSON 格式回复。' })
     }
 
     const body: Record<string, unknown> = {
       model: this.model,
       input,
-      reasoning: { effort: 'high' },
+      store: false,
     }
     if (instructions) body.instructions = instructions
     if (options.maxTokens != null) body.max_output_tokens = options.maxTokens
     if (options.responseFormat === 'json') body.text = { format: { type: 'json_object' } }
 
-    // Responses API 的 tools 格式
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools.map(t => ({
         type: 'function',
@@ -179,12 +196,13 @@ export class OpenAIAdapter implements LLMProviderAdapter {
         description: t.function.description,
         parameters: t.function.parameters,
       }))
+      body.tool_choice = this.toResponsesToolChoice(options.tool_choice) ?? 'auto'
     }
 
     return body
   }
 
-  private async chatCodex(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
+  private async chatResponses(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
     const body = this.buildResponsesInput(options)
 
     const res = await fetch(`${this.baseUrl}/responses`, {
@@ -195,19 +213,22 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText)
-      throw new Error(`Codex API 错误 (${res.status}): ${err.substring(0, 300)}`)
+      throw new Error(`Responses API 错误 (${res.status}): ${err.substring(0, 500)}`)
     }
 
     const data = await res.json() as Record<string, unknown>
-    const output = data.output as Array<Record<string, unknown>> | undefined
+    const result = this.parseResponsesResult(data)
 
-    // 调试日志：查看 Responses API 返回的 output 结构
-    if (options.tools && options.tools.length > 0) {
-      console.log('[Codex tools] output types:', output?.map(o => o.type))
+    if (!result.content && !result.tool_calls) {
+      result.content = await this.collectStreamContent(() => this.streamResponses(options))
     }
 
-    // 提取文本内容
-    let content = ''
+    return result
+  }
+
+  private parseResponsesResult(data: Record<string, unknown>): ChatCompletionResult {
+    const output = data.output as Array<Record<string, unknown>> | undefined
+    let content = typeof data.output_text === 'string' ? data.output_text : ''
     const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = []
 
     if (output) {
@@ -216,7 +237,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
           const contentArr = item.content as Array<Record<string, unknown>> | undefined
           if (contentArr) {
             for (const part of contentArr) {
-              if (part.type === 'output_text' && typeof part.text === 'string') {
+              if (part.type === 'output_text' && typeof part.text === 'string' && !content.includes(part.text)) {
                 content += part.text
               }
             }
@@ -227,7 +248,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
             type: 'function',
             function: {
               name: item.name as string,
-              arguments: item.arguments as string,
+              arguments: typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments ?? {}),
             },
           })
         }
@@ -239,35 +260,19 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       model: this.model,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: data.usage ? (() => {
-        const u = data.usage as Record<string, number>
+        const usage = data.usage as Record<string, number>
+        const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
+        const completionTokens = usage.output_tokens ?? usage.completion_tokens ?? 0
         return {
-          promptTokens: u.input_tokens ?? u.prompt_tokens ?? 0,
-          completionTokens: u.output_tokens ?? u.completion_tokens ?? 0,
-          totalTokens: u.total_tokens ?? (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
+          promptTokens,
+          completionTokens,
+          totalTokens: usage.total_tokens ?? promptTokens + completionTokens,
         }
       })() : undefined,
     }
   }
 
-  private extractResponsesContent(data: Record<string, unknown>): string {
-    const output = data.output as Array<Record<string, unknown>> | undefined
-    if (!output) return ''
-
-    for (const item of output) {
-      if (item.type === 'message') {
-        const contentArr = item.content as Array<Record<string, unknown>> | undefined
-        if (!contentArr) continue
-        for (const part of contentArr) {
-          if (part.type === 'output_text' && typeof part.text === 'string') {
-            return part.text
-          }
-        }
-      }
-    }
-    return ''
-  }
-
-  private async *streamCodex(options: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
+  private async *streamResponses(options: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
     const body = this.buildResponsesInput(options)
     body.stream = true
 
@@ -279,20 +284,24 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText)
-      throw new Error(`Codex stream 错误 (${res.status}): ${err.substring(0, 300)}`)
+      throw new Error(`Responses stream 错误 (${res.status}): ${err.substring(0, 500)}`)
     }
 
     yield* this.parseSSE(res, (parsed) => {
-      // response.output_text.delta 事件
       if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
         return { content: parsed.delta, done: false }
       }
-      // response.completed 事件
-      if (parsed.type === 'response.completed') {
-        return { content: '', done: true }
-      }
+      if (parsed.type === 'response.completed') return { content: '', done: true }
       return null
     })
+  }
+
+  private async collectStreamContent(createStream: () => AsyncGenerator<StreamChunk>): Promise<string> {
+    let content = ''
+    for await (const chunk of createStream()) {
+      content += chunk.content
+    }
+    return content
   }
 
   // ==================== SSE 解析器 ====================

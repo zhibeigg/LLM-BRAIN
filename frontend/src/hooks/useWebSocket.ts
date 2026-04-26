@@ -33,6 +33,8 @@ export function useWebSocket() {
   const setQueue = useTaskStore((s) => s.setQueue)
   const setPendingPlan = useTaskStore((s) => s.setPendingPlan)
   const setPendingStep = useTaskStore((s) => s.setPendingStep)
+  const persistCurrentSession = useTaskStore((s) => s.persistCurrentSession)
+  const schedulePersistCurrentSession = useTaskStore((s) => s.schedulePersistCurrentSession)
   const fetchGraph = useGraphStore((s) => s.fetchGraph)
   const addNewNodeId = useGraphStore((s) => s.addNewNodeId)
 
@@ -48,6 +50,7 @@ export function useWebSocket() {
         data: payload,
       })
       setActiveNode(payload.currentNodeId)
+      schedulePersistCurrentSession('running')
     })
 
     const unsubLeaderDecision = wsClient.on('leader_decision', (msg: WSMessage) => {
@@ -59,6 +62,7 @@ export function useWebSocket() {
         data: payload,
       })
       setActiveEdge(payload.chosenEdgeId)
+      schedulePersistCurrentSession('running')
     })
 
     const unsubAgentStream = wsClient.on('agent_stream', (msg: WSMessage) => {
@@ -66,6 +70,7 @@ export function useWebSocket() {
       appendAgentOutput(payload.chunk)
       // 合并连续的 agent_stream 到同一个步骤中
       mergeAgentStream(payload, msg.timestamp)
+      schedulePersistCurrentSession('running')
     })
 
     const unsubToolCall = wsClient.on('tool_call', (msg: WSMessage) => {
@@ -75,6 +80,7 @@ export function useWebSocket() {
       } else {
         updateToolCall(payload.callId, payload, msg.timestamp)
       }
+      schedulePersistCurrentSession('running')
     })
 
     const unsubBossVerdict = wsClient.on('boss_verdict', (msg: WSMessage) => {
@@ -87,6 +93,9 @@ export function useWebSocket() {
       })
       if (payload.passed) {
         setIsRunning(false)
+        persistCurrentSession('success')
+      } else {
+        schedulePersistCurrentSession('running')
       }
     })
 
@@ -100,6 +109,9 @@ export function useWebSocket() {
       })
       if (payload.phase === 'done' || payload.phase === 'error') {
         setIsLearning(false)
+        persistCurrentSession(payload.phase === 'error' ? 'error' : 'success')
+      } else {
+        schedulePersistCurrentSession('running')
       }
     })
 
@@ -152,6 +164,7 @@ export function useWebSocket() {
     const unsubError = wsClient.on('error', (msg: WSMessage) => {
       const payload = msg.payload as { message: string }
       setError(payload.message)
+      persistCurrentSession('error')
     })
 
     return () => {
@@ -171,5 +184,5 @@ export function useWebSocket() {
       unsubError()
       wsClient.disconnect()
     }
-  }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, fetchGraph, addNewNodeId])
+  }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, persistCurrentSession, schedulePersistCurrentSession, fetchGraph, addNewNodeId])
 }

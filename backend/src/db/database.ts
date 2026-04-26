@@ -25,6 +25,7 @@ export function getDb(): Database.Database {
     migrateAddBrainId(db)
     migrateAddUserId(db)
     migrateAddProjectPath(db)
+    migrateAddProviderApiFields(db)
     migrateAddIndexes(db)
   }
   return db
@@ -125,6 +126,8 @@ function initTables(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS llm_providers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      provider_type TEXT NOT NULL DEFAULT 'openai',
+      api_mode TEXT NOT NULL DEFAULT 'auto',
       base_url TEXT NOT NULL,
       api_key TEXT NOT NULL,
       models TEXT NOT NULL DEFAULT '[]'
@@ -227,6 +230,21 @@ function migrateAddProjectPath(db: Database.Database): void {
 
   db.exec(`ALTER TABLE brains ADD COLUMN project_path TEXT DEFAULT ''`)
   console.log('数据库迁移完成：brains 表已添加 project_path 列')
+}
+
+/** 迁移：为 llm_providers 表添加供应商类型和 API 模式 */
+function migrateAddProviderApiFields(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(llm_providers)").all() as Array<{ name: string }>
+
+  if (!columns.some(c => c.name === 'provider_type')) {
+    db.exec(`ALTER TABLE llm_providers ADD COLUMN provider_type TEXT NOT NULL DEFAULT 'openai'`)
+    console.log('数据库迁移完成：llm_providers 表已添加 provider_type 列')
+  }
+
+  if (!columns.some(c => c.name === 'api_mode')) {
+    db.exec(`ALTER TABLE llm_providers ADD COLUMN api_mode TEXT NOT NULL DEFAULT 'auto'`)
+    console.log('数据库迁移完成：llm_providers 表已添加 api_mode 列')
+  }
 }
 
 /** 迁移：为 nodes 和 edges 表添加缺失的索引 */

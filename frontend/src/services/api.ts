@@ -4,6 +4,7 @@ import type {
   MemoryEdge,
   PersonalityDimension,
   LLMProvider,
+  LLMProviderType,
   LLMRoleConfig,
   DifficultyPersonalityMapping,
   DifficultyType,
@@ -51,10 +52,16 @@ export const brainsApi = {
       body: JSON.stringify({ name, description, projectPath, initProject }),
     }),
 
-  update: (id: string, updates: Partial<Pick<Brain, 'name' | 'description'>>) =>
+  update: (id: string, updates: Partial<Pick<Brain, 'name' | 'description' | 'projectPath'>>) =>
     request<Brain>(`/brains/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
+    }),
+
+  initProject: (id: string, projectPath?: string) =>
+    request<{ status: 'started'; projectPath: string }>(`/brains/${id}/init`, {
+      method: 'POST',
+      body: JSON.stringify({ projectPath }),
     }),
 
   delete: (id: string) =>
@@ -200,10 +207,10 @@ export const llmApi = {
     }),
 
   // 用临时凭据检测模型（添加提供商前预检）
-  detectModelsWithCredentials: (baseUrl: string, apiKey: string) =>
+  detectModelsWithCredentials: (baseUrl: string, apiKey: string, providerType: LLMProviderType = 'openai') =>
     request<{ models: string[]; count: number }>('/llm/detect-models', {
       method: 'POST',
-      body: JSON.stringify({ baseUrl, apiKey }),
+      body: JSON.stringify({ baseUrl, apiKey, providerType }),
     }),
 }
 

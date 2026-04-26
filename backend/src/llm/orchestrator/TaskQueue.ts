@@ -40,6 +40,12 @@ export class TaskQueue {
       createdAt: Date.now(),
     }
 
+    await this.enqueueItem(item)
+    return item
+  }
+
+  /** 添加已有任务项到等待队列 */
+  async enqueueItem(item: QueueItem): Promise<void> {
     const release = await this.mutex.acquire()
     try {
       this._queue.push(item)
@@ -47,8 +53,6 @@ export class TaskQueue {
     } finally {
       release()
     }
-
-    return item
   }
 
   /**

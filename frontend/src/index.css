@@ -373,6 +373,219 @@ html, body, #root {
   background: linear-gradient(to top, var(--color-bg-panel, #16161A), transparent);
 }
 
+/* ========== GraphSignalOverlay 神经场叠层 ========== */
+
+.graph-signal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+  color: var(--signal-text);
+  isolation: isolate;
+}
+
+.graph-signal-field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.72;
+  mix-blend-mode: screen;
+}
+
+.graph-signal-field__wash {
+  opacity: 0.38;
+  transform-origin: 50% 50%;
+  animation: signalFieldBreathing 7s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.graph-signal-status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: min(250px, calc(100% - 24px));
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--signal-primary) 26%, var(--signal-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--signal-panel) 82%, transparent);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(10px);
+}
+
+.graph-signal-status__eyebrow,
+.graph-signal-status__title,
+.graph-signal-status__detail,
+.graph-signal-event__time,
+.graph-signal-event__label,
+.graph-signal-event__detail {
+  margin: 0;
+}
+
+.graph-signal-status__eyebrow {
+  color: var(--signal-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.graph-signal-status__title {
+  color: var(--signal-text);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  margin-top: 3px;
+}
+
+.graph-signal-status__detail {
+  color: var(--signal-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-signal-status__metrics {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.graph-signal-status__metrics span,
+.graph-signal-log__item {
+  border: 1px solid color-mix(in srgb, var(--signal-primary) 20%, var(--signal-border));
+  background: color-mix(in srgb, var(--signal-card) 74%, transparent);
+}
+
+.graph-signal-status__metrics span {
+  border-radius: 999px;
+  color: var(--signal-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 5px 7px;
+}
+
+.graph-signal-event {
+  position: absolute;
+  right: 12px;
+  top: 118px;
+  width: min(250px, calc(100% - 24px));
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--event-color, var(--signal-primary)) 38%, var(--signal-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--signal-card) 78%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+  animation: signalEventIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.graph-signal-event--leader { --event-color: var(--signal-leader); }
+.graph-signal-event--agent { --event-color: var(--signal-agent); }
+.graph-signal-event--tool { --event-color: var(--signal-tool); }
+.graph-signal-event--boss { --event-color: var(--signal-boss); }
+.graph-signal-event--memory { --event-color: var(--signal-memory); }
+.graph-signal-event--alert { --event-color: var(--signal-alert); }
+
+.graph-signal-event__time {
+  color: color-mix(in srgb, var(--event-color) 74%, var(--signal-text));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.graph-signal-event__label {
+  color: var(--signal-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.graph-signal-event__detail {
+  color: var(--signal-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-signal-log {
+  position: absolute;
+  left: 14px;
+  bottom: 44px;
+  display: grid;
+  gap: 6px;
+  width: min(260px, calc(100% - 168px));
+}
+
+.graph-signal-log__item {
+  --log-color: var(--signal-primary);
+  display: grid;
+  gap: 2px;
+  border-color: color-mix(in srgb, var(--log-color) 28%, var(--signal-border));
+  border-radius: 10px;
+  padding: 7px 9px;
+  transform: translateX(0);
+  animation: signalLogIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.graph-signal-log__item--leader { --log-color: var(--signal-leader); }
+.graph-signal-log__item--agent { --log-color: var(--signal-agent); }
+.graph-signal-log__item--tool { --log-color: var(--signal-tool); }
+.graph-signal-log__item--boss { --log-color: var(--signal-boss); }
+.graph-signal-log__item--memory { --log-color: var(--signal-memory); }
+.graph-signal-log__item--alert { --log-color: var(--signal-alert); }
+
+.graph-signal-log__item span {
+  color: var(--signal-text);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.graph-signal-log__item small {
+  color: var(--signal-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes signalFieldBreathing {
+  0%, 100% { opacity: 0.24; transform: scale(0.96); }
+  50% { opacity: 0.46; transform: scale(1.04); }
+}
+
+@keyframes signalEventIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes signalLogIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 767px) {
+  .graph-signal-status,
+  .graph-signal-event {
+    display: none;
+  }
+
+  .graph-signal-log {
+    width: min(220px, calc(100% - 28px));
+    bottom: 16px;
+  }
+}
+
 /* 尊重用户的减弱动画偏好 */
 @media (prefers-reduced-motion: reduce) {
   *,

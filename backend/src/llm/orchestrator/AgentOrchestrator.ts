@@ -45,11 +45,10 @@ export class AgentOrchestrator {
     if (openaiTools.length > 0) {
       const agent = new AgentRole(personalityPrompt)
       agentResult = await agent.executeWithTools(agentInput, openaiTools, { brainId })
-      const agentLatency = Date.now() - agentStartTime
       broadcast('agent_stream', {
-        chunk: agentResult,
+        chunk: '',
         done: true,
-        trace: { model: agentModel, prompt: agentInput, rawResponse: agentResult, latencyMs: agentLatency },
+        trace: { model: agentModel, prompt: agentInput, rawResponse: agentResult, latencyMs: Date.now() - agentStartTime },
       } satisfies AgentStreamPayload)
     } else {
       const agent = new AgentRole(personalityPrompt)

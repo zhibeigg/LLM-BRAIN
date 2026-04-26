@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   Box, IconButton, CircularProgress, Tooltip, Typography, InputBase,
   Menu, MenuItem, ListItemIcon, ListItemText, Divider, Checkbox,
@@ -15,17 +15,56 @@ import {
   Assignment as PlanIcon,
   TouchApp as SupervisedIcon,
   Visibility as ReadonlyIcon,
-  Block as RejectIcon,
   SmartToy as AutoReviewIcon,
-  ExpandMore as ExpandIcon,
 } from '@mui/icons-material'
-import { useTaskStore } from '../../stores/taskStore'
+import { useQueueStore, useTaskExecutionStore, useTaskStore } from '../../stores/taskStore'
+import { useBrainStore } from '../../stores/brainStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { brainsApi } from '../../services/api'
 import { useColors } from '../../ThemeContext'
 import { useResponsive } from '../../hooks/useResponsive'
 import type { ExecutionMode } from '../../types'
 
 const LEARN_PATTERN = /^学习\s+(.+)/
+const INIT_PATTERN = /^\/init(?:\s+(.+))?$/i
+const SLASH_LEARN_PATTERN = /^\/learn(?:\s+(.+))?$/i
+const SLASH_TASK_PATTERN = /^\/task(?:\s+(.+))?$/i
+const INPUT_HISTORY_LIMIT = 50
+
+const COMMAND_SUGGESTIONS = [
+  {
+    id: 'init',
+    command: '/init',
+    usage: '/init [项目路径]',
+    insertText: '/init ',
+    title: '初始化项目',
+    description: '扫描并绑定当前大脑的项目上下文',
+    icon: <PlanIcon sx={{ fontSize: 16 }} />,
+    keywords: ['初始化', '项目', '路径', 'project', 'init'],
+  },
+  {
+    id: 'learn',
+    command: '/learn',
+    usage: '/learn 主题',
+    insertText: '/learn ',
+    title: '学习主题',
+    description: '让大脑围绕指定主题学习和沉淀记忆',
+    icon: <LearnIcon sx={{ fontSize: 16 }} />,
+    keywords: ['学习', '主题', '知识', 'learn', 'topic'],
+  },
+  {
+    id: 'task',
+    command: '/task',
+    usage: '/task 任务描述',
+    insertText: '/task ',
+    title: '执行任务',
+    description: '明确以普通任务方式发送后续内容',
+    icon: <SendIcon sx={{ fontSize: 16 }} />,
+    keywords: ['任务', '执行', '发送', 'task', 'ask'],
+  },
+] as const
+
+type CommandSuggestion = typeof COMMAND_SUGGESTIONS[number]
 
 interface Attachment {
   id: string
@@ -49,12 +88,23 @@ export function ChatInput() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [pendingQueue, setPendingQueue] = useState<PendingMessage[]>([])
   const [modeMenuAnchor, setModeMenuAnchor] = useState<null | HTMLElement>(null)
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0)
+  const [commandMenuDismissed, setCommandMenuDismissed] = useState(false)
+  const [inputHistory, setInputHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const draftBeforeHistoryRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const isRunning = useTaskStore((s) => s.isRunning)
-  const isLearning = useTaskStore((s) => s.isLearning)
-  const queue = useTaskStore((s) => s.queue)
+  const isRunning = useTaskExecutionStore((s) => s.isRunning)
+  const isLearning = useTaskExecutionStore((s) => s.isLearning)
+  const queue = useQueueStore((s) => s.queue)
+  const setIsLearning = useTaskExecutionStore((s) => s.setIsLearning)
+  const setError = useTaskExecutionStore((s) => s.setError)
+  const setCurrentTaskPrompt = useTaskExecutionStore((s) => s.setCurrentTaskPrompt)
+  const addThinkingStep = useTaskExecutionStore((s) => s.addThinkingStep)
+  const currentBrainId = useBrainStore((s) => s.currentBrainId)
+  const fetchBrains = useBrainStore((s) => s.fetchBrains)
   const startTask = useTaskStore((s) => s.startTask)
   const learnTopic = useTaskStore((s) => s.learnTopic)
   const executionMode = useTaskStore((s) => s.executionMode)
@@ -63,6 +113,32 @@ export function ChatInput() {
   const setAutoReview = useTaskStore((s) => s.setAutoReview)
 
   const busy = isRunning || isLearning
+
+  const runInitCommand = useCallback(async (projectPath?: string) => {
+    if (!currentBrainId) {
+      setError('请先选择一个大脑')
+      return
+    }
+
+    const displayPrompt = projectPath ? `/init ${projectPath}` : '/init'
+    setCurrentTaskPrompt(displayPrompt)
+    setError(null)
+    setIsLearning(true)
+    addThinkingStep({
+      id: `init-command-${Date.now()}`,
+      type: 'learning_progress',
+      timestamp: Date.now(),
+      data: { phase: 'analyzing', message: projectPath ? `准备初始化项目：${projectPath}` : '准备初始化当前大脑绑定的项目' },
+    })
+
+    try {
+      await brainsApi.initProject(currentBrainId, projectPath)
+      if (projectPath) await fetchBrains()
+    } catch (err) {
+      setIsLearning(false)
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [currentBrainId, setError, setIsLearning, setCurrentTaskPrompt, addThinkingStep, fetchBrains])
 
   // 发送一条消息到后端
   const dispatchMessage = useCallback((msg: PendingMessage) => {
@@ -77,13 +153,41 @@ export function ChatInput() {
       prompt = `${prompt}\n\n${attachInfo}`
     }
 
+    const initMatch = prompt.match(INIT_PATTERN)
+    if (initMatch) {
+      runInitCommand(initMatch[1]?.trim())
+      return
+    }
+
+    const slashLearnMatch = prompt.match(SLASH_LEARN_PATTERN)
+    if (slashLearnMatch) {
+      const topic = slashLearnMatch[1]?.trim()
+      if (!topic) {
+        setError('请输入要学习的主题')
+        return
+      }
+      learnTopic(topic)
+      return
+    }
+
+    const slashTaskMatch = prompt.match(SLASH_TASK_PATTERN)
+    if (slashTaskMatch) {
+      const taskPrompt = slashTaskMatch[1]?.trim()
+      if (!taskPrompt) {
+        setError('请输入要执行的任务')
+        return
+      }
+      startTask(taskPrompt)
+      return
+    }
+
     const learnMatch = prompt.match(LEARN_PATTERN)
     if (learnMatch) {
       learnTopic(learnMatch[1].trim())
     } else {
       startTask(prompt)
     }
-  }, [startTask, learnTopic])
+  }, [startTask, learnTopic, runInitCommand, setError])
 
   // 任务完成后自动发送本地队列的下一条
   useEffect(() => {
@@ -94,10 +198,23 @@ export function ChatInput() {
     }
   }, [busy, pendingQueue, dispatchMessage])
 
+  const rememberInput = useCallback((value: string) => {
+    const normalized = value.trim()
+    if (!normalized) return
+    setInputHistory((prev) => {
+      const withoutDuplicate = prev.filter((item) => item !== normalized)
+      return [...withoutDuplicate, normalized].slice(-INPUT_HISTORY_LIMIT)
+    })
+    setHistoryIndex(null)
+    draftBeforeHistoryRef.current = ''
+  }, [])
+
   // 提交当前输入
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
     if (!trimmed && attachments.length === 0) return
+
+    rememberInput(trimmed)
 
     const msg: PendingMessage = {
       id: `local-${Date.now()}`,
@@ -114,10 +231,122 @@ export function ChatInput() {
     } else {
       dispatchMessage(msg)
     }
-  }, [input, attachments, busy, dispatchMessage])
+  }, [input, attachments, busy, dispatchMessage, rememberInput])
+
+  const slashCommandState = useMemo(() => {
+    const value = input.trimStart()
+    if (!value.startsWith('/')) return { hasArgs: false, suggestions: [] as CommandSuggestion[] }
+
+    const body = value.slice(1)
+    const hasArgs = /\s/.test(body)
+    const query = body.split(/\s/, 1)[0].toLowerCase()
+    const suggestions = COMMAND_SUGGESTIONS.filter((item) => {
+      if (!query) return true
+      const haystack = [item.command.slice(1), item.title, item.description, ...item.keywords].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+
+    return { hasArgs, suggestions }
+  }, [input])
+
+  const commandSuggestions = slashCommandState.suggestions
+  const showCommandSuggestions = !commandMenuDismissed && !slashCommandState.hasArgs && commandSuggestions.length > 0
+  const selectedCommandIndex = commandSuggestions.length > 0
+    ? Math.min(activeCommandIndex, commandSuggestions.length - 1)
+    : 0
+
+  const applyCommandSuggestion = useCallback((suggestion: CommandSuggestion) => {
+    setInput(suggestion.insertText)
+    setCommandMenuDismissed(true)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.setSelectionRange(suggestion.insertText.length, suggestion.insertText.length)
+    })
+  }, [])
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value)
+    setHistoryIndex(null)
+    draftBeforeHistoryRef.current = ''
+    setCommandMenuDismissed(false)
+  }, [])
+
+  const recallHistory = useCallback((direction: 'prev' | 'next') => {
+    if (inputHistory.length === 0) return false
+
+    const inputElement = inputRef.current
+    const selectionStart = inputElement?.selectionStart ?? input.length
+    const selectionEnd = inputElement?.selectionEnd ?? input.length
+    const isCaretAtStart = selectionStart === 0 && selectionEnd === 0
+    const isCaretAtEnd = selectionStart === input.length && selectionEnd === input.length
+
+    if (direction === 'prev' && input.trim() && historyIndex === null && !isCaretAtStart) return false
+    if (direction === 'next' && historyIndex === null) return false
+    if (direction === 'next' && !isCaretAtEnd) return false
+
+    let nextIndex: number | null
+    if (direction === 'prev') {
+      if (historyIndex === null) {
+        draftBeforeHistoryRef.current = input
+        nextIndex = inputHistory.length - 1
+      } else {
+        nextIndex = Math.max(0, historyIndex - 1)
+      }
+    } else {
+      if (historyIndex === null) return false
+      nextIndex = historyIndex + 1
+      if (nextIndex >= inputHistory.length) nextIndex = null
+    }
+
+    const nextValue = nextIndex === null ? draftBeforeHistoryRef.current : inputHistory[nextIndex]
+    setHistoryIndex(nextIndex)
+    setInput(nextValue)
+    setCommandMenuDismissed(true)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.setSelectionRange(nextValue.length, nextValue.length)
+    })
+    return true
+  }, [historyIndex, input, inputHistory])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (showCommandSuggestions) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setActiveCommandIndex((selectedCommandIndex + 1) % commandSuggestions.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setActiveCommandIndex((selectedCommandIndex - 1 + commandSuggestions.length) % commandSuggestions.length)
+          return
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault()
+          applyCommandSuggestion(commandSuggestions[selectedCommandIndex] ?? commandSuggestions[0])
+          return
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setCommandMenuDismissed(true)
+          return
+        }
+      }
+
+      if (!showCommandSuggestions && e.key === 'ArrowUp') {
+        if (recallHistory('prev')) {
+          e.preventDefault()
+          return
+        }
+      }
+      if (!showCommandSuggestions && e.key === 'ArrowDown') {
+        if (recallHistory('next')) {
+          e.preventDefault()
+          return
+        }
+      }
+
       const sendKey = useSettingsStore.getState().sendKey
       if (sendKey === 'ctrl+enter') {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -131,7 +360,7 @@ export function ChatInput() {
         }
       }
     },
-    [handleSend],
+    [handleSend, showCommandSuggestions, commandSuggestions, selectedCommandIndex, applyCommandSuggestion, recallHistory],
   )
 
   // 粘贴图片
@@ -198,7 +427,7 @@ export function ChatInput() {
     setPendingQueue(prev => prev.filter(m => m.id !== id))
   }, [])
 
-  const isLearnCommand = LEARN_PATTERN.test(input.trim())
+  const isLearnCommand = LEARN_PATTERN.test(input.trim()) || SLASH_LEARN_PATTERN.test(input.trim())
   const hasInput = input.trim().length > 0 || attachments.length > 0
   const hasPendingQueue = pendingQueue.length > 0
 
@@ -365,6 +594,63 @@ export function ChatInput() {
         </Box>
       )}
 
+      {/* 指令推荐 */}
+      {showCommandSuggestions && (
+        <Box
+          role="listbox"
+          aria-label="指令推荐"
+          sx={{
+            overflow: 'hidden',
+            borderRadius: '10px',
+            border: `1px solid ${c.border}`,
+            bgcolor: c.bgPanel,
+            boxShadow: `0 12px 32px ${c.shadow}`,
+          }}
+        >
+          <Box sx={{ px: 1.25, py: 0.75, display: 'flex', alignItems: 'center', gap: 0.75, borderBottom: `1px solid ${c.border}` }}>
+            <Typography sx={{ fontSize: 12, color: c.primary, fontWeight: 700 }}>/ 指令</Typography>
+            <Typography sx={{ fontSize: 11, color: c.textMuted }}>继续输入可筛选，Enter/Tab 选择</Typography>
+          </Box>
+          {commandSuggestions.map((suggestion, index) => {
+            const selected = index === selectedCommandIndex
+            return (
+              <Box
+                key={suggestion.id}
+                role="option"
+                aria-selected={selected}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setActiveCommandIndex(index)}
+                onClick={() => applyCommandSuggestion(suggestion)}
+                sx={{
+                  px: 1.25,
+                  py: 0.9,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  cursor: 'pointer',
+                  bgcolor: selected ? `${c.primary}12` : 'transparent',
+                  borderLeft: `3px solid ${selected ? c.primary : 'transparent'}`,
+                  '&:hover': { bgcolor: `${c.primary}10` },
+                }}
+              >
+                <Box sx={{ color: selected ? c.primary : c.textMuted, display: 'flex', alignItems: 'center' }}>
+                  {suggestion.icon}
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flexWrap: 'wrap' }}>
+                    <Typography sx={{ fontSize: 13, color: c.text, fontWeight: 700 }}>{suggestion.command}</Typography>
+                    <Typography sx={{ fontSize: 11, color: c.textMuted }}>{suggestion.usage}</Typography>
+                  </Box>
+                  <Typography sx={{ fontSize: 11, color: c.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {suggestion.title} · {suggestion.description}
+                  </Typography>
+                </Box>
+              </Box>
+            )
+          })}
+        </Box>
+      )}
+
       {/* 输入行 */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: isMobile ? 0.5 : 0.75 }}>
         {/* 模式选择器 - 移动端隐藏，合并到菜单 */}
@@ -458,10 +744,10 @@ export function ChatInput() {
           <InputBase
             inputRef={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={busy ? '输入后排队执行...' : '输入任务... 或「学习 主题名」'}
+            placeholder={busy ? '输入后排队执行...' : '输入任务... 输入 / 查看指令'}
             fullWidth
             aria-label="输入任务或学习主题"
             sx={{

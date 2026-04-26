@@ -79,6 +79,7 @@ interface TaskExecutionActions {
   setIsRunning: (running: boolean) => void
   setIsLearning: (learning: boolean) => void
   setError: (error: string | null) => void
+  setCurrentTaskPrompt: (prompt: string | null) => void
   reset: () => void
   addThinkingStep: (step: ThinkingStep) => void
   mergeAgentStream: (payload: AgentStreamPayload, timestamp: number) => void
@@ -133,6 +134,11 @@ export const useTaskExecutionStore = create<TaskExecutionStore>()(
           state.isRunning = false
           state.isLearning = false
         }
+      }),
+
+    setCurrentTaskPrompt: (prompt) =>
+      set((state) => {
+        state.currentTaskPrompt = prompt
       }),
 
     reset: () =>
@@ -329,11 +335,22 @@ export const useSessionStore = create<SessionStore>()(
       })
       try {
         const result = await chatSessionsApi.getPage(brainId ?? undefined)
+        const sessions = result.items.map(dtoToSession)
+        const execState = useTaskExecutionStore.getState()
         set((state) => {
-          state.sessions = result.items.map(dtoToSession)
+          state.sessions = sessions
           state.sessionsHasMore = result.hasMore
           state.sessionsCursor = result.nextCursor ?? null
           state.sessionsLoading = false
+          if (state.activeSessionId && !sessions.some((session) => session.id === state.activeSessionId)) {
+            state.activeSessionId = null
+          }
+          if (state.viewingSessionId && !sessions.some((session) => session.id === state.viewingSessionId)) {
+            state.viewingSessionId = null
+          }
+          if (!state.activeSessionId && !state.viewingSessionId && !execState.isRunning && !execState.isLearning) {
+            state.viewingSessionId = sessions.find((session) => session.status !== 'running')?.id ?? null
+          }
         })
       } catch (e) {
         console.error('加载会话历史失败:', e)
@@ -490,6 +507,7 @@ interface LegacyTaskStoreActions {
   setIsRunning: (running: boolean) => void
   setIsLearning: (learning: boolean) => void
   setError: (error: string | null) => void
+  setCurrentTaskPrompt: (prompt: string | null) => void
   reset: () => void
   setPendingPlan: (plan: PlanReadyPayload | null) => void
   setPendingStep: (step: StepConfirmPayload | null) => void
@@ -508,7 +526,8 @@ interface LegacyTaskStoreActions {
   setAutoReview: (auto: boolean) => void
   startTask: (prompt: string) => Promise<void>
   learnTopic: (topic: string) => Promise<void>
-  persistCurrentSession: () => Promise<void>
+  persistCurrentSession: (status?: ChatSession['status']) => Promise<void>
+  schedulePersistCurrentSession: (status?: ChatSession['status']) => void
 }
 
 type LegacyTaskStore = LegacyTaskStoreState & LegacyTaskStoreActions
@@ -517,17 +536,49 @@ async function persistSession(
   sessionId: string,
   agentOutput: string,
   thinkingSteps: ThinkingStep[],
-  status: 'success' | 'error'
+  status?: ChatSession['status']
 ) {
   try {
     await chatSessionsApi.update(sessionId, {
       agentOutput,
       thinkingSteps,
-      status,
+      ...(status ? { status } : {}),
     })
   } catch (e) {
     console.error('持久化会话失败:', e)
   }
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+function getCurrentSessionSnapshot(status?: ChatSession['status']) {
+  const execState = useTaskExecutionStore.getState()
+  const sessionState = useSessionStore.getState()
+  const sessionId = sessionState.activeSessionId
+  if (!sessionId) return null
+
+  const session = sessionState.sessions.find((s) => s.id === sessionId)
+  const nextStatus = status ?? session?.status ?? (execState.error ? 'error' : 'running')
+
+  return {
+    sessionId,
+    agentOutput: execState.agentOutput,
+    thinkingSteps: [...execState.thinkingSteps],
+    status: nextStatus,
+  }
+}
+
+function updateCurrentSessionSnapshot(status?: ChatSession['status']) {
+  const snapshot = getCurrentSessionSnapshot(status)
+  if (!snapshot) return null
+
+  useSessionStore.getState().updateSession(snapshot.sessionId, {
+    agentOutput: snapshot.agentOutput,
+    thinkingSteps: snapshot.thinkingSteps,
+    status: snapshot.status,
+  })
+
+  return snapshot
 }
 
 // 创建统一的 legacy store
@@ -604,6 +655,7 @@ const legacyStore = create<LegacyTaskStore>()(
     setIsRunning: (running) => useTaskExecutionStore.getState().setIsRunning(running),
     setIsLearning: (learning) => useTaskExecutionStore.getState().setIsLearning(learning),
     setError: (error) => useTaskExecutionStore.getState().setError(error),
+    setCurrentTaskPrompt: (prompt) => useTaskExecutionStore.getState().setCurrentTaskPrompt(prompt),
     reset: () => useTaskExecutionStore.getState().reset(),
     setPendingPlan: (plan) => useTaskExecutionStore.getState().setPendingPlan(plan),
     setPendingStep: (step) => useTaskExecutionStore.getState().setPendingStep(step),
@@ -650,6 +702,7 @@ const legacyStore = create<LegacyTaskStore>()(
       const newSession: ChatSession = dtoToSession(serverSession)
 
       useTaskExecutionStore.getState().reset()
+      useTaskExecutionStore.getState().setCurrentTaskPrompt(prompt)
       useTaskExecutionStore.getState().setIsRunning(true)
       useTaskExecutionStore.getState().setError(null)
       useSessionStore.getState().addSession(newSession)
@@ -693,6 +746,7 @@ const legacyStore = create<LegacyTaskStore>()(
       const newSession: ChatSession = dtoToSession(serverSession)
 
       useTaskExecutionStore.getState().reset()
+      useTaskExecutionStore.getState().setCurrentTaskPrompt(displayPrompt)
       useTaskExecutionStore.getState().setIsLearning(true)
       useTaskExecutionStore.getState().setError(null)
       useSessionStore.getState().addSession(newSession)
@@ -706,17 +760,34 @@ const legacyStore = create<LegacyTaskStore>()(
         useSessionStore.getState().updateSession(newSession.id, { status: 'error' })
       }
     },
-    persistCurrentSession: async () => {
-      const execState = useTaskExecutionStore.getState()
-      const sessionState = useSessionStore.getState()
-      if (sessionState.activeSessionId && (execState.isRunning || execState.isLearning)) {
-        await persistSession(
-          sessionState.activeSessionId,
-          execState.agentOutput,
-          execState.thinkingSteps,
-          execState.error ? 'error' : 'success'
-        )
+    persistCurrentSession: async (status) => {
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
       }
+      const snapshot = updateCurrentSessionSnapshot(status)
+      if (!snapshot) return
+      await persistSession(
+        snapshot.sessionId,
+        snapshot.agentOutput,
+        snapshot.thinkingSteps,
+        snapshot.status,
+      )
+    },
+    schedulePersistCurrentSession: (status) => {
+      updateCurrentSessionSnapshot(status)
+      if (persistTimer) clearTimeout(persistTimer)
+      persistTimer = setTimeout(() => {
+        persistTimer = null
+        const snapshot = getCurrentSessionSnapshot(status)
+        if (!snapshot) return
+        persistSession(
+          snapshot.sessionId,
+          snapshot.agentOutput,
+          snapshot.thinkingSteps,
+          snapshot.status,
+        )
+      }, 500)
     },
   }))
 )
@@ -762,6 +833,7 @@ const legacyGetState = (): LegacyTaskStore => {
     setIsRunning: execState.setIsRunning,
     setIsLearning: execState.setIsLearning,
     setError: execState.setError,
+    setCurrentTaskPrompt: execState.setCurrentTaskPrompt,
     reset: execState.reset,
     setPendingPlan: execState.setPendingPlan,
     setPendingStep: execState.setPendingStep,
@@ -781,6 +853,7 @@ const legacyGetState = (): LegacyTaskStore => {
     startTask: (useTaskStore as unknown as LegacyTaskStore).startTask,
     learnTopic: (useTaskStore as unknown as LegacyTaskStore).learnTopic,
     persistCurrentSession: (useTaskStore as unknown as LegacyTaskStore).persistCurrentSession,
+    schedulePersistCurrentSession: (useTaskStore as unknown as LegacyTaskStore).schedulePersistCurrentSession,
   }
 }
 Object.assign(useTaskStore, { getState: legacyGetState })

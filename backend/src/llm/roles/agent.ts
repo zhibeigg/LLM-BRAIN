@@ -46,12 +46,14 @@ export class AgentRole extends LLMRoleBase {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const result = await this.chatWithMessages(messages, tools)
 
-      // 如果没有 tool_calls，直接返回文本
+      // 如果没有 tool_calls，说明进入最终回答阶段；改用流式请求重新生成最终回答
       if (!result.tool_calls || result.tool_calls.length === 0) {
-        const content = result.content
-        // 流式推送最终结果
-        broadcast('agent_stream', { chunk: content, done: true } satisfies AgentStreamPayload)
-        return content
+        let content = ''
+        for await (const chunk of this.chatStreamWithMessages(messages)) {
+          content += chunk.content
+          broadcast('agent_stream', { chunk: chunk.content, done: chunk.done } satisfies AgentStreamPayload)
+        }
+        return content || result.content
       }
 
       // 有 tool_calls 且有中间思考内容时，推送给前端
@@ -102,9 +104,12 @@ export class AgentRole extends LLMRoleBase {
       }
     }
 
-    // 超过最大轮次，做最后一次不带工具的调用
-    const finalResult = await this.chatWithMessages(messages)
-    broadcast('agent_stream', { chunk: finalResult.content, done: true } satisfies AgentStreamPayload)
-    return finalResult.content
+    // 超过最大轮次，做最后一次不带工具的流式调用
+    let finalContent = ''
+    for await (const chunk of this.chatStreamWithMessages(messages)) {
+      finalContent += chunk.content
+      broadcast('agent_stream', { chunk: chunk.content, done: chunk.done } satisfies AgentStreamPayload)
+    }
+    return finalContent
   }
 }

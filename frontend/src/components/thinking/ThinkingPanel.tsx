@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import { Box, Typography, Chip, LinearProgress, Alert, Collapse, IconButton, Tooltip, Button, CircularProgress } from '@mui/material'
 import {
   Psychology as ThinkIcon,
@@ -20,7 +20,7 @@ import {
   Queue as QueueIcon,
   Build as BuildIcon,
 } from '@mui/icons-material'
-import { useTaskStore } from '../../stores/taskStore'
+import { useQueueStore, useSessionStore, useTaskExecutionStore, useTaskStore } from '../../stores/taskStore'
 import { useGraphStore } from '../../stores/graphStore'
 import type { ThinkingStep, ChatSession } from '../../stores/taskStore'
 import type {
@@ -168,9 +168,9 @@ function FriendlyContent({ text, maxHeight }: { text: string; maxHeight?: number
                 {String(node.title ?? '?')}
                 <Typography component="span" sx={{ fontSize: 10, color: t.dimText, ml: 0.5 }}>({String(node.type ?? '')})</Typography>
               </Typography>
-              {node.content && (
+              {typeof node.content === 'string' && node.content && (
                 <Typography sx={{ fontSize: 10, color: t.mutedText, mt: 0.25 }}>
-                  {String(node.content).slice(0, 100)}{String(node.content).length > 100 ? '…' : ''}
+                  {node.content.slice(0, 100)}{node.content.length > 100 ? '…' : ''}
                 </Typography>
               )}
             </TraceRow>
@@ -1120,20 +1120,20 @@ function PromptCard({ prompt, isHistory }: { prompt: string; isHistory: boolean 
 export function ThinkingPanel() {
   const c = useColors()
   const t = useStepTheme()
-  const isRunning = useTaskStore((s) => s.isRunning)
-  const isLearning = useTaskStore((s) => s.isLearning)
-  const thinkingSteps = useTaskStore((s) => s.thinkingSteps)
-  const currentTaskPrompt = useTaskStore((s) => s.currentTaskPrompt)
-  const error = useTaskStore((s) => s.error)
-  const sessions = useTaskStore((s) => s.sessions)
-  const activeSessionId = useTaskStore((s) => s.activeSessionId)
-  const viewingSessionId = useTaskStore((s) => s.viewingSessionId)
-  const viewSession = useTaskStore((s) => s.viewSession)
-  const deleteSession = useTaskStore((s) => s.deleteSession)
-  const queue = useTaskStore((s) => s.queue)
-  const removeFromQueue = useTaskStore((s) => s.removeFromQueue)
-  const pendingPlan = useTaskStore((s) => s.pendingPlan)
-  const pendingStep = useTaskStore((s) => s.pendingStep)
+  const isRunning = useTaskExecutionStore((s) => s.isRunning)
+  const isLearning = useTaskExecutionStore((s) => s.isLearning)
+  const thinkingSteps = useTaskExecutionStore((s) => s.thinkingSteps)
+  const currentTaskPrompt = useTaskExecutionStore((s) => s.currentTaskPrompt)
+  const error = useTaskExecutionStore((s) => s.error)
+  const pendingPlan = useTaskExecutionStore((s) => s.pendingPlan)
+  const pendingStep = useTaskExecutionStore((s) => s.pendingStep)
+  const sessions = useSessionStore((s) => s.sessions)
+  const activeSessionId = useSessionStore((s) => s.activeSessionId)
+  const viewingSessionId = useSessionStore((s) => s.viewingSessionId)
+  const viewSession = useSessionStore((s) => s.viewSession)
+  const deleteSession = useSessionStore((s) => s.deleteSession)
+  const queue = useQueueStore((s) => s.queue)
+  const removeFromQueue = useQueueStore((s) => s.removeFromQueue)
   const approvePlan = useTaskStore((s) => s.approvePlan)
   const rejectPlan = useTaskStore((s) => s.rejectPlan)
   const approveStep = useTaskStore((s) => s.approveStep)
@@ -1141,13 +1141,15 @@ export function ThinkingPanel() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomAnchorRef = useRef<HTMLDivElement>(null)
+  const historyScrollRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
+  const historyScrollSnapshotRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
 
   const busy = isRunning || isLearning
-  const sessionsHasMore = useTaskStore((s) => s.sessionsHasMore)
-  const sessionsLoading = useTaskStore((s) => s.sessionsLoading)
-  const loadMoreSessions = useTaskStore((s) => s.loadMoreSessions)
+  const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
+  const sessionsLoading = useSessionStore((s) => s.sessionsLoading)
+  const loadMoreSessions = useSessionStore((s) => s.loadMoreSessions)
 
   const viewingSession = useMemo(() => {
     if (!viewingSessionId) return null
@@ -1177,26 +1179,40 @@ export function ThinkingPanel() {
     }
   }, [viewingSessionId, isViewingHistory])
 
-  // 渐进式滚动加载历史会话
+  // 渐进式滚动加载历史会话：滚动到历史列表顶部时加载更早记录
   useEffect(() => {
-    if (!historyOpen || !loadMoreRef.current) return
+    const historyScroll = historyScrollRef.current
+    const loadMoreMarker = loadMoreRef.current
+    if (!historyOpen || !historyScroll || !loadMoreMarker) return
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && sessionsHasMore && !sessionsLoading) {
+          historyScrollSnapshotRef.current = {
+            scrollHeight: historyScroll.scrollHeight,
+            scrollTop: historyScroll.scrollTop,
+          }
           loadMoreSessions()
         }
       },
-      { threshold: 0.1 },
+      { root: historyScroll, threshold: 0.1 },
     )
-    observer.observe(loadMoreRef.current)
+    observer.observe(loadMoreMarker)
     return () => observer.disconnect()
   }, [historyOpen, sessionsHasMore, sessionsLoading, loadMoreSessions])
+
+  useLayoutEffect(() => {
+    const snapshot = historyScrollSnapshotRef.current
+    const historyScroll = historyScrollRef.current
+    if (!snapshot || !historyScroll) return
+    historyScroll.scrollTop = historyScroll.scrollHeight - snapshot.scrollHeight + snapshot.scrollTop
+    historyScrollSnapshotRef.current = null
+  }, [historySessions.length])
 
   const statusColor = useMemo(() => {
     if (isLearning) return '#C084FC'
     if (isRunning) return c.primary
     return c.textMuted
-  }, [isRunning, isLearning])
+  }, [isRunning, isLearning, c.primary, c.textMuted])
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', p: 2.5 }}>
@@ -1247,21 +1263,11 @@ export function ThinkingPanel() {
 
       {/* 历史会话列表 */}
       <Collapse in={historyOpen && historySessions.length > 0} timeout={200}>
-        <Box sx={{ mb: 2, maxHeight: 320, overflowY: 'auto', borderRadius: '10px', border: `1px solid ${c.border}`, bgcolor: t.historyBg, p: 1, flexShrink: 0 }}>
+        <Box ref={historyScrollRef} sx={{ mb: 2, maxHeight: 320, overflowY: 'auto', borderRadius: '10px', border: `1px solid ${c.border}`, bgcolor: t.historyBg, p: 1, flexShrink: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, px: 0.5 }}>
             <Typography sx={{ fontSize: 11, color: c.textMuted, fontWeight: 500 }}>历史会话 ({historySessions.length}{sessionsHasMore ? '+' : ''})</Typography>
           </Box>
-          {historySessions.map((session) => (
-            <SessionItem
-              key={session.id}
-              session={session}
-              isActive={session.id === activeSessionId}
-              isViewing={session.id === viewingSessionId}
-              onClick={() => viewSession(session.id === viewingSessionId ? null : session.id)}
-              onDelete={() => deleteSession(session.id)}
-            />
-          ))}
-          {/* 滚动加载哨兵 */}
+          {/* 顶部加载哨兵 */}
           <div ref={loadMoreRef} style={{ height: 1 }} />
           {sessionsLoading && (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
@@ -1273,6 +1279,16 @@ export function ThinkingPanel() {
               已加载全部
             </Typography>
           )}
+          {historySessions.map((session) => (
+            <SessionItem
+              key={session.id}
+              session={session}
+              isActive={session.id === activeSessionId}
+              isViewing={session.id === viewingSessionId}
+              onClick={() => viewSession(session.id === viewingSessionId ? null : session.id)}
+              onDelete={() => deleteSession(session.id)}
+            />
+          ))}
         </Box>
       </Collapse>
 

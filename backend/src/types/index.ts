@@ -109,9 +109,15 @@ export const BUILTIN_DIMENSIONS: Omit<PersonalityDimension, 'id' | 'brainId'>[] 
 
 // ===== LLM 类型 =====
 
+export type LLMProviderType = 'openai' | 'anthropic'
+
+export type LLMApiMode = 'auto' | 'openai-chat' | 'openai-responses' | 'anthropic-messages'
+
 export interface LLMProvider {
   id: string
   name: string
+  providerType: LLMProviderType
+  apiMode: LLMApiMode
   baseUrl: string
   apiKey: string
   models: string[]

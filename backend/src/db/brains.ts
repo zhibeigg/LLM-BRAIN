@@ -69,7 +69,7 @@ export function createBrain(name: string, description: string = '', userId: stri
     positionY: 0,
   })
 
-  return { id, name, description, projectPath, createdAt: now, updatedAt: now }
+  return { id, userId, name, description, projectPath, createdAt: now, updatedAt: now }
 }
 
 export function updateBrain(id: string, updates: Partial<Pick<Brain, 'name' | 'description' | 'projectPath'>>): Brain | null {
