@@ -10,6 +10,12 @@ import { executeTerminal } from './implementations/terminal.js'
 import { executeShareFile } from './implementations/share-file.js'
 import { executeBrowser } from './implementations/browser.js'
 import { executeNodeEdit, executeNodeDelete, executeNodeList } from './implementations/node-control.js'
+import { executeFileRead } from './implementations/file-read.js'
+import { executeFileWrite } from './implementations/file-write.js'
+import { executeFileEdit } from './implementations/file-edit.js'
+import { executeFileSearch } from './implementations/file-search.js'
+import { executeFileGlob } from './implementations/file-glob.js'
+import { executeFileList } from './implementations/file-list.js'
 
 // ── 工具定义 ──
 
@@ -198,6 +204,101 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
+  // ── Coding 工具 ──
+  {
+    id: 'file_read',
+    name: '文件读取',
+    description: '读取项目文件内容，支持指定行范围',
+    category: 'coding',
+    defaultEnabled: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文件路径（相对于项目目录）' },
+        startLine: { type: 'number', description: '起始行号（从 1 开始）' },
+        endLine: { type: 'number', description: '结束行号' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    id: 'file_write',
+    name: '文件写入',
+    description: '创建或覆盖项目文件，覆盖前自动备份',
+    category: 'coding',
+    defaultEnabled: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文件路径（相对于项目目录）' },
+        content: { type: 'string', description: '文件内容' },
+      },
+      required: ['path', 'content'],
+    },
+  },
+  {
+    id: 'file_edit',
+    name: '文件编辑',
+    description: '精确字符串替换编辑文件，编辑前自动备份',
+    category: 'coding',
+    defaultEnabled: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文件路径（相对于项目目录）' },
+        old_string: { type: 'string', description: '要替换的原始文本' },
+        new_string: { type: 'string', description: '替换后的新文本' },
+        replace_all: { type: 'boolean', description: '是否替换所有匹配（默认仅替换第一个）' },
+      },
+      required: ['path', 'old_string', 'new_string'],
+    },
+  },
+  {
+    id: 'file_search',
+    name: '代码搜索',
+    description: '在项目中搜索代码，支持正则表达式（优先使用 ripgrep）',
+    category: 'coding',
+    defaultEnabled: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: '搜索模式（支持正则表达式）' },
+        path: { type: 'string', description: '搜索目录（相对于项目目录，默认整个项目）' },
+        glob: { type: 'string', description: '文件过滤模式，如 "*.ts" 或 "*.{js,jsx}"' },
+        max_results: { type: 'number', description: '最大结果数量（默认 30，最大 50）' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    id: 'file_glob',
+    name: '文件查找',
+    description: '按文件名模式查找文件（支持 * 和 ** 通配符）',
+    category: 'coding',
+    defaultEnabled: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: '文件名模式，如 "**/*.ts" 或 "src/**/*.tsx"' },
+        path: { type: 'string', description: '搜索目录（相对于项目目录，默认整个项目）' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    id: 'file_list',
+    name: '目录列表',
+    description: '以 tree 风格展示项目目录结构',
+    category: 'coding',
+    defaultEnabled: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '目录路径（相对于项目目录，默认项目根目录）' },
+        depth: { type: 'number', description: '最大深度（默认 3，最大 6）' },
+      },
+    },
+  },
 ]
 
 // ── 执行器映射 ──
@@ -217,6 +318,12 @@ const EXECUTORS: Record<string, ToolExecutor> = {
   node_edit: executeNodeEdit as ToolExecutor,
   node_delete: executeNodeDelete as ToolExecutor,
   node_list: executeNodeList as ToolExecutor,
+  file_read: executeFileRead as ToolExecutor,
+  file_write: executeFileWrite as ToolExecutor,
+  file_edit: executeFileEdit as ToolExecutor,
+  file_search: executeFileSearch as ToolExecutor,
+  file_glob: executeFileGlob as ToolExecutor,
+  file_list: executeFileList as ToolExecutor,
 }
 
 // ── 公开 API ──

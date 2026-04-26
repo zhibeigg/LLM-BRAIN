@@ -25,6 +25,7 @@ export class AgentOrchestrator {
    * @param memoryContext 记忆上下文
    * @param enabledTools 启用的工具列表
    * @param brainId 脑图ID
+   * @param projectPath 项目路径
    * @returns Agent 执行结果
    */
   async execute(
@@ -32,19 +33,27 @@ export class AgentOrchestrator {
     dimensions: PersonalityDimension[],
     memoryContext: string,
     enabledTools: string[],
-    brainId: string
+    brainId: string,
+    projectPath?: string
   ): Promise<string> {
+    const agentConfig = getRoleConfig('agent')
+    if (!agentConfig) {
+      const msg = '请先在设置中为 Agent 角色配置 LLM 模型'
+      broadcast('error', { message: msg })
+      return msg
+    }
+
     const personalityPrompt = this.buildPersonalityPrompt(dimensions)
     const agentInput = `任务：${taskPrompt}\n\n参考记忆：\n${memoryContext}`
 
     let agentResult = ''
     const openaiTools = buildOpenAITools(enabledTools)
     const agentStartTime = Date.now()
-    const agentModel = getRoleConfig('agent')?.model
+    const agentModel = agentConfig.model
 
     if (openaiTools.length > 0) {
       const agent = new AgentRole(personalityPrompt)
-      agentResult = await agent.executeWithTools(agentInput, openaiTools, { brainId })
+      agentResult = await agent.executeWithTools(agentInput, openaiTools, { brainId, projectPath })
       broadcast('agent_stream', {
         chunk: '',
         done: true,

@@ -4,6 +4,7 @@ import { getNodesByBrainId, getNodeById, createNode } from '../../db/nodes.js'
 import { createEdge, getEdgesBySourceId } from '../../db/edges.js'
 import { broadcast } from '../../ws/server.js'
 import { scanProject } from './scanner.js'
+import { getRoleConfig } from '../../db/llm-config.js'
 import type { DifficultyType, LearningProgressPayload } from '../../types/index.js'
 
 interface ScholarNode {
@@ -45,6 +46,16 @@ function broadcastProgress(payload: LearningProgressPayload) {
  * 初始化项目图谱：扫描项目结构，调用 Scholar 生成知识节点图
  */
 export async function initProjectGraph(brainId: string, projectPath: string): Promise<void> {
+  // 0. 前置检查：LLM 是否已配置
+  const scholarConfig = getRoleConfig('scholar')
+  if (!scholarConfig) {
+    broadcastProgress({
+      phase: 'error',
+      message: '请先在设置中配置 LLM 服务商并为 Scholar 角色分配模型',
+    })
+    return
+  }
+
   // 1. 扫描项目
   broadcastProgress({ phase: 'analyzing', message: '正在扫描项目结构...' })
 

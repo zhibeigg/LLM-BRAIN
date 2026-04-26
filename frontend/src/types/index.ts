@@ -180,6 +180,7 @@ export interface LLMTrace {
 export type WSMessageType =
   | 'leader_step'
   | 'leader_decision'
+  | 'leader_return'
   | 'agent_stream'
   | 'tool_call'
   | 'boss_verdict'
@@ -191,6 +192,7 @@ export type WSMessageType =
   | 'queue_update'
   | 'plan_ready'
   | 'step_confirm'
+  | 'task_complete'
   | 'error'
 
 export interface WSMessage {
@@ -200,6 +202,7 @@ export interface WSMessage {
 }
 
 export interface LeaderStepPayload {
+  stepIndex: number
   currentNodeId: string
   candidates: Array<{
     edgeId: string
@@ -289,7 +292,7 @@ export type ExecutionMode = 'auto' | 'plan' | 'supervised' | 'readonly'
 export interface PlanReadyPayload {
   planId: string
   taskPrompt: string
-  path: Array<{ nodeId: string; nodeTitle: string; nodeType: string }>
+  path: Array<{ nodeId: string; nodeTitle: string; nodeType: string; stepIndex: number }>
   memoryContext: string
   totalSteps: number
   requestId?: string
@@ -300,6 +303,19 @@ export interface StepConfirmPayload {
   type: 'leader_decision' | 'agent_execute'
   description: string
   requestId?: string
+  /** 可回退的历史节点列表 */
+  returnableNodes?: Array<{ nodeId: string; nodeTitle: string; stepIndex: number }>
+}
+
+/** 前端审批响应的 action 类型 */
+export type ApprovalAction = 'approve' | 'reject' | 'return_to'
+
+/** leader_return 事件 payload */
+export interface LeaderReturnPayload {
+  returnToNodeId: string
+  returnToNodeTitle: string
+  returnToStepIndex: number
+  reason: string
 }
 
 // ===== 工具系统 =====
@@ -309,5 +325,27 @@ export interface ToolDefinition {
   name: string
   description: string
   defaultEnabled: boolean
-  category: 'search' | 'code' | 'memory' | 'utility'
+  category: 'search' | 'code' | 'memory' | 'utility' | 'coding'
+}
+
+// ===== 开发工具管理 =====
+
+export interface DevToolInfo {
+  id: string
+  name: string
+  description: string
+  version: string
+  installMethod: 'npm' | 'system'
+  purpose: string
+  installed: boolean
+  installedVersion?: string
+  path?: string
+}
+
+export interface DevToolInstallPayload {
+  toolId: string
+  phase: 'downloading' | 'installing' | 'done' | 'error'
+  progress?: number
+  message?: string
+  version?: string
 }

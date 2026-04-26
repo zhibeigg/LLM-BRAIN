@@ -6,6 +6,7 @@ import type {
   WSMessage,
   LeaderStepPayload,
   LeaderDecisionPayload,
+  LeaderReturnPayload,
   AgentStreamPayload,
   BossVerdictPayload,
   LearningProgressPayload,
@@ -96,6 +97,18 @@ export function useWebSocket() {
       if (payload.chosenEdgeId) {
         setLeaderPathEdge(payload.chosenEdgeId)
       }
+      schedulePersistCurrentSession('running')
+    })
+
+    const unsubLeaderReturn = wsClient.on('leader_return', (msg: WSMessage) => {
+      const payload = msg.payload as LeaderReturnPayload
+      addThinkingStep({
+        id: nextId(),
+        type: 'leader_return',
+        timestamp: msg.timestamp,
+        data: payload,
+      })
+      setActiveNode(payload.returnToNodeId)
       schedulePersistCurrentSession('running')
     })
 
@@ -202,9 +215,21 @@ export function useWebSocket() {
       persistCurrentSession('error')
     })
 
+    const unsubTaskComplete = wsClient.on('task_complete', (msg: WSMessage) => {
+      const payload = msg.payload as { status: 'success' | 'error'; type: 'task' | 'learn'; prompt: string }
+      if (payload.type === 'learn') {
+        setIsLearning(false)
+      } else {
+        setIsRunning(false)
+      }
+      // 如果 boss_verdict 已经处理了 success，这里做兜底确保状态一致
+      persistCurrentSession(payload.status)
+    })
+
     return () => {
       unsubLeaderStep()
       unsubLeaderDecision()
+      unsubLeaderReturn()
       unsubAgentStream()
       unsubToolCall()
       unsubBossVerdict()
@@ -217,6 +242,7 @@ export function useWebSocket() {
       unsubPlanReady()
       unsubStepConfirm()
       unsubError()
+      unsubTaskComplete()
       wsClient.disconnect()
     }
   }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, pushLeaderPathNode, setLeaderPathEdge, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, persistCurrentSession, schedulePersistCurrentSession, fetchGraph, addNewNodeId])

@@ -1,7 +1,7 @@
 import { broadcast } from '../../ws/server.js'
 import { randomUUID } from 'crypto'
 import { Mutex } from 'async-mutex'
-import type { ExecutionMode } from '../../types/index.js'
+import type { ExecutionMode, ExecutionSnapshot, LeaderReturnPayload } from '../../types/index.js'
 
 import { TaskQueue } from './TaskQueue.js'
 import { LeaderOrchestrator, DifficultyAdjuster } from './LeaderOrchestrator.js'
@@ -12,6 +12,8 @@ import { ApprovalManager } from './ApprovalManager.js'
 import { getDimensionsByBrainId } from '../../db/personality.js'
 import { getMappings } from '../../db/difficulty-mapping.js'
 import { autoExtractNodes } from '../../core/extraction/engine.js'
+import { getNodeById } from '../../db/nodes.js'
+import { getBrainById } from '../../db/brains.js'
 
 const MAX_RETRIES = 3
 
@@ -77,7 +79,7 @@ export class Orchestrator {
     const release = await this.mutex.acquire()
     try {
       if (!this.taskQueue.isRunning) {
-        // 空闲时直接执行，不把当前任务显示为“排队中”
+        // 空闲时直接执行，不把当前任务显示为"排队中"
         this._runItem(item).catch(err => {
           console.error('Queue item execution error:', err)
         })
@@ -107,28 +109,34 @@ export class Orchestrator {
         this.taskQueue.isRunning = true
         release() // 释放锁，让executeTask自己获取
 
+        let taskStatus: 'success' | 'error' = 'success'
         try {
           await this.executeTask(item.prompt, item.brainId, true)
         } catch (err) {
+          taskStatus = 'error'
           console.error('Task execution error:', err)
           broadcast('error', { message: err instanceof Error ? err.message : String(err) })
         } finally {
           this.taskQueue.isRunning = false
+          broadcast('task_complete', { status: taskStatus, type: 'task', prompt: item.prompt })
           this._onTaskFinished()
         }
       } else {
         this.taskQueue.isRunning = true
         release() // 释放锁
 
+        let learnStatus: 'success' | 'error' = 'success'
         try {
           const { learnTopic } = await import('../../core/learning/engine.js')
           await learnTopic(item.prompt, item.brainId)
         } catch (err) {
+          learnStatus = 'error'
           console.error('Learning error:', err)
           broadcast('learning_progress', { phase: 'error', message: err instanceof Error ? err.message : String(err) })
           broadcast('error', { message: err instanceof Error ? err.message : String(err) })
         } finally {
           this.taskQueue.isRunning = false
+          broadcast('task_complete', { status: learnStatus, type: 'learn', prompt: item.prompt })
           this._onTaskFinished()
         }
       }
@@ -183,31 +191,46 @@ export class Orchestrator {
   private async _executeTaskInner(taskPrompt: string, brainId: string): Promise<string> {
     const dimensions = getDimensionsByBrainId(brainId)
     const mappings = getMappings()
+    const brain = getBrainById(brainId)
 
-    // ── Leader 决策循环 ──
+    // ── Leader 决策循环（支持回退） ──
     const { visitedPath, collectedMemories, totalSteps } = await this.leaderOrchestrator.executeDecisionLoop(
       taskPrompt,
       brainId,
       dimensions,
       mappings,
       this._mode,
-      (_requestId, description) => this.approvalManager.requestStepApproval(description)
+      (description, snapshots) => this.approvalManager.requestStepApproval(description, snapshots)
     )
 
-    // ── plan 模式：路径遍历完后暂停，等待用户确认 ──
+    // ── plan / supervised 模式：路径遍历完后暂停，等待用户确认（支持回退） ──
     if (this._mode === 'plan' || this._mode === 'supervised') {
       const planPayload = {
         planId: randomUUID(),
         taskPrompt,
-        path: collectedMemories.map(n => ({ nodeId: n.id, nodeTitle: n.title, nodeType: n.type })),
+        path: collectedMemories.map((n, i) => ({ nodeId: n.id, nodeTitle: n.title, nodeType: n.type, stepIndex: i })),
         memoryContext: collectedMemories.map(n => `[${n.title}]: ${n.content.substring(0, 100)}`).join('\n'),
         totalSteps,
       }
 
-      const approved = await this.approvalManager.requestPlanApproval(planPayload)
-      if (!approved) {
+      const planResult = await this.approvalManager.requestPlanApproval(planPayload)
+
+      if (planResult.action === 'reject') {
         broadcast('error', { message: '用户拒绝了执行计划' })
         return '计划被用户拒绝'
+      }
+
+      if (planResult.action === 'return_to' && planResult.returnToNodeId) {
+        // 用户在计划审批阶段请求回退到某个节点，重新执行 Leader 决策
+        const returnNode = getNodeById(planResult.returnToNodeId)
+        broadcast('leader_return', {
+          returnToNodeId: planResult.returnToNodeId,
+          returnToNodeTitle: returnNode?.title ?? '未知',
+          returnToStepIndex: collectedMemories.findIndex(n => n.id === planResult.returnToNodeId),
+          reason: '用户在计划审批阶段请求回退重选',
+        } satisfies LeaderReturnPayload)
+        // 递归重新执行整个任务（Leader 会从头开始，但路径难度已调整）
+        return this._executeTaskInner(taskPrompt, brainId)
       }
     }
 
@@ -218,7 +241,8 @@ export class Orchestrator {
       dimensions,
       memoryContext,
       this._enabledTools,
-      brainId
+      brainId,
+      brain?.projectPath
     )
 
     // ── Boss 验证 ──

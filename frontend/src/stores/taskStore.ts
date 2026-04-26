@@ -12,6 +12,7 @@ import type {
   ExecutionMode,
   PlanReadyPayload,
   StepConfirmPayload,
+  LeaderReturnPayload,
 } from '../types'
 import { taskApi, learnApi, chatSessionsApi } from '../services/api'
 import type { ChatSessionDTO } from '../services/api'
@@ -25,11 +26,12 @@ import { wsClient } from '../services/websocket'
 
 export interface ThinkingStep {
   id: string
-  type: 'leader_step' | 'leader_decision' | 'agent_stream' | 'boss_verdict' | 'learning_progress' | 'tool_call'
+  type: 'leader_step' | 'leader_decision' | 'leader_return' | 'agent_stream' | 'boss_verdict' | 'learning_progress' | 'tool_call'
   timestamp: number
   data:
     | LeaderStepPayload
     | LeaderDecisionPayload
+    | LeaderReturnPayload
     | AgentStreamPayload
     | BossVerdictPayload
     | LearningProgressPayload
@@ -102,6 +104,10 @@ interface TaskExecutionActions {
   rejectPlan: () => void
   approveStep: () => void
   rejectStep: () => void
+  /** 回退到指定节点（supervised 模式下的 step 审批） */
+  returnToNode: (nodeId: string) => void
+  /** 回退到指定节点（plan 审批阶段） */
+  returnToPlanNode: (nodeId: string) => void
 }
 
 type TaskExecutionStore = TaskExecutionState & TaskExecutionActions
@@ -283,6 +289,24 @@ export const useTaskExecutionStore = create<TaskExecutionStore>()(
       wsClient.send('step_response', { approved: false, requestId })
       set((state) => {
         state.pendingStep = null
+      })
+    },
+
+    returnToNode: (nodeId: string) => {
+      const { pendingStep } = get()
+      const requestId = pendingStep?.requestId || pendingStep?.stepId || `step-${Date.now()}`
+      wsClient.send('step_response', { action: 'return_to', requestId, returnToNodeId: nodeId })
+      set((state) => {
+        state.pendingStep = null
+      })
+    },
+
+    returnToPlanNode: (nodeId: string) => {
+      const { pendingPlan } = get()
+      const requestId = pendingPlan?.requestId || `plan-${Date.now()}`
+      wsClient.send('plan_response', { action: 'return_to', requestId, returnToNodeId: nodeId })
+      set((state) => {
+        state.pendingPlan = null
       })
     },
   }))
@@ -542,6 +566,8 @@ interface LegacyTaskStoreActions {
   rejectPlan: () => void
   approveStep: () => void
   rejectStep: () => void
+  returnToNode: (nodeId: string) => void
+  returnToPlanNode: (nodeId: string) => void
   viewSession: (id: string | null) => void
   deleteSession: (id: string) => Promise<void>
   clearSessions: () => void
@@ -553,6 +579,7 @@ interface LegacyTaskStoreActions {
   setAutoReview: (auto: boolean) => void
   startTask: (prompt: string) => Promise<void>
   learnTopic: (topic: string) => Promise<void>
+  retryCurrentTask: () => Promise<void>
   persistCurrentSession: (status?: ChatSession['status']) => Promise<void>
   schedulePersistCurrentSession: (status?: ChatSession['status']) => void
 }
@@ -695,6 +722,8 @@ const legacyStore = create<LegacyTaskStore>()(
     rejectPlan: () => useTaskExecutionStore.getState().rejectPlan(),
     approveStep: () => useTaskExecutionStore.getState().approveStep(),
     rejectStep: () => useTaskExecutionStore.getState().rejectStep(),
+    returnToNode: (nodeId) => useTaskExecutionStore.getState().returnToNode(nodeId),
+    returnToPlanNode: (nodeId) => useTaskExecutionStore.getState().returnToPlanNode(nodeId),
     viewSession: (id) => useSessionStore.getState().viewSession(id),
     deleteSession: (id) => useSessionStore.getState().deleteSession(id),
     clearSessions: () => useSessionStore.getState().clearSessions(),
@@ -792,6 +821,56 @@ const legacyStore = create<LegacyTaskStore>()(
         useSessionStore.getState().updateSession(newSession.id, { status: 'error' })
       }
     },
+    retryCurrentTask: async () => {
+      const sessionState = useSessionStore.getState()
+      const execState = useTaskExecutionStore.getState()
+
+      // 找到当前活跃的 error 会话
+      const activeId = sessionState.activeSessionId ?? sessionState.viewingSessionId
+      if (!activeId) return
+      const session = sessionState.sessions.find((s) => s.id === activeId)
+      if (!session || session.status !== 'error') return
+
+      const prompt = session.prompt
+      const brainId = useBrainStore.getState().currentBrainId
+      if (!brainId) {
+        useTaskExecutionStore.getState().setError('请先选择一个大脑')
+        return
+      }
+
+      // 重置执行状态，但复用当前会话
+      execState.reset()
+      execState.setCurrentTaskPrompt(prompt)
+      execState.setError(null)
+
+      // 更新会话状态为 running
+      useSessionStore.getState().updateSession(activeId, { status: 'running', agentOutput: '', thinkingSteps: [] })
+      useSessionStore.setState({ activeSessionId: activeId, viewingSessionId: null })
+      chatSessionsApi.update(activeId, { status: 'running', agentOutput: '', thinkingSteps: [] }).catch(() => {})
+
+      if (session.type === 'learn') {
+        execState.setIsLearning(true)
+        try {
+          const topic = prompt.replace(/^学习:\s*/, '').replace(/^\/learn\s*/i, '')
+          await learnApi.learn(topic, brainId)
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : '学习失败'
+          useTaskExecutionStore.getState().setError(errMsg)
+          chatSessionsApi.update(activeId, { status: 'error' }).catch(() => {})
+          useSessionStore.getState().updateSession(activeId, { status: 'error' })
+        }
+      } else {
+        execState.setIsRunning(true)
+        try {
+          await taskApi.execute(prompt, brainId, useQueueStore.getState().executionMode, useSettingsStore.getState().enabledTools)
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : '任务执行失败'
+          useTaskExecutionStore.getState().setError(errMsg)
+          chatSessionsApi.update(activeId, { status: 'error' }).catch(() => {})
+          useSessionStore.getState().updateSession(activeId, { status: 'error' })
+        }
+      }
+    },
     persistCurrentSession: async (status) => {
       if (persistTimer) {
         clearTimeout(persistTimer)
@@ -876,6 +955,8 @@ const legacyGetState = (): LegacyTaskStore => {
     rejectPlan: execState.rejectPlan,
     approveStep: execState.approveStep,
     rejectStep: execState.rejectStep,
+    returnToNode: execState.returnToNode,
+    returnToPlanNode: execState.returnToPlanNode,
     viewSession: sessionState.viewSession,
     deleteSession: sessionState.deleteSession,
     clearSessions: sessionState.clearSessions,
@@ -887,6 +968,7 @@ const legacyGetState = (): LegacyTaskStore => {
     setAutoReview: queueState.setAutoReview,
     startTask: (useTaskStore as unknown as LegacyTaskStore).startTask,
     learnTopic: (useTaskStore as unknown as LegacyTaskStore).learnTopic,
+    retryCurrentTask: (useTaskStore as unknown as LegacyTaskStore).retryCurrentTask,
     persistCurrentSession: (useTaskStore as unknown as LegacyTaskStore).persistCurrentSession,
     schedulePersistCurrentSession: (useTaskStore as unknown as LegacyTaskStore).schedulePersistCurrentSession,
   }

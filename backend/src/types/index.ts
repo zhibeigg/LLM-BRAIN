@@ -166,6 +166,17 @@ export interface ExecutionHistory {
   createdAt: number
 }
 
+// ===== 执行快照（回退机制） =====
+
+/** Leader 决策循环中每步的快照，用于支持回退到历史节点重新选择 */
+export interface ExecutionSnapshot {
+  stepIndex: number
+  nodeId: string
+  nodeTitle: string
+  visitedPath: string[]
+  collectedMemoryIds: string[]
+}
+
 // ===== LLM 调用溯源 =====
 
 export interface LLMTrace {
@@ -181,6 +192,7 @@ export interface LLMTrace {
 export type WSMessageType =
   | 'leader_step'
   | 'leader_decision'
+  | 'leader_return'
   | 'agent_stream'
   | 'tool_call'
   | 'boss_verdict'
@@ -192,7 +204,9 @@ export type WSMessageType =
   | 'queue_update'
   | 'plan_ready'
   | 'step_confirm'
+  | 'task_complete'
   | 'error'
+  | 'dev_tool_install_progress'
 
 export interface WSMessage {
   type: WSMessageType
@@ -201,6 +215,7 @@ export interface WSMessage {
 }
 
 export interface LeaderStepPayload {
+  stepIndex: number
   currentNodeId: string
   candidates: Array<{
     edgeId: string
@@ -294,6 +309,7 @@ export interface PlanReadyPayload {
     nodeId: string
     nodeTitle: string
     nodeType: string
+    stepIndex: number
   }>
   memoryContext: string
   totalSteps: number
@@ -305,14 +321,35 @@ export interface StepConfirmPayload {
   type: 'leader_decision' | 'agent_execute'
   description: string
   requestId?: string
+  /** 可回退的历史节点列表（supervised 模式下提供） */
+  returnableNodes?: Array<{ nodeId: string; nodeTitle: string; stepIndex: number }>
 }
 
 /** 前端发回后端的消息类型 */
-export type ClientMessageType = 'plan_response' | 'step_response'
+export type ClientMessageType = 'plan_response' | 'step_response' | 'return_to_node'
 
 export interface ClientMessage {
   type: ClientMessageType
   payload: unknown
+}
+
+/** 前端审批响应的 action 类型 */
+export type ApprovalAction = 'approve' | 'reject' | 'return_to'
+
+/** step_response / plan_response 的统一 payload */
+export interface ApprovalResponsePayload {
+  action: ApprovalAction
+  requestId: string
+  /** action='return_to' 时指定回退目标节点 */
+  returnToNodeId?: string
+}
+
+/** leader_return 事件 payload */
+export interface LeaderReturnPayload {
+  returnToNodeId: string
+  returnToNodeTitle: string
+  returnToStepIndex: number
+  reason: string
 }
 
 // ===== 工具系统 =====
@@ -337,12 +374,13 @@ export interface ToolDefinition {
   description: string
   parameters: ToolParameters
   defaultEnabled: boolean
-  category: 'search' | 'code' | 'memory' | 'utility'
+  category: 'search' | 'code' | 'memory' | 'utility' | 'coding'
 }
 
 /** 工具执行上下文 */
 export interface ToolContext {
   brainId: string
+  projectPath?: string
 }
 
 /** 工具执行结果 */
@@ -357,4 +395,34 @@ export interface ToolCall {
   id: string
   name: string
   arguments: string // JSON string
+}
+
+// ===== 开发工具管理 =====
+
+export interface DevToolDefinition {
+  id: string
+  name: string
+  description: string
+  version: string
+  installMethod: 'npm' | 'system'
+  npmPackage?: string
+  binaryName: string
+  versionCommand: string[]
+  /** 工具用途说明 */
+  purpose: string
+}
+
+export interface DevToolStatus {
+  id: string
+  installed: boolean
+  version?: string
+  path?: string
+}
+
+export interface DevToolInstallPayload {
+  toolId: string
+  phase: 'downloading' | 'installing' | 'done' | 'error'
+  progress?: number
+  message?: string
+  version?: string
 }

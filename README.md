@@ -31,13 +31,16 @@
 
 - **多角色 LLM 协作** — Leader 寻路、Agent 执行、Boss 验证、Scholar 学习、Evaluator 评估
 - **有向记忆图谱** — 可视化知识网络，节点拖拽编辑，自动布局，视口裁剪与边聚合优化
+- **路径回退与重选** — supervised/plan 模式下可随时回退到历史节点重新选择路径，无需从头重来
 - **智能知识蒸馏** — 仅在发现新功能/新约束/新知识时创建节点，标题去重防止膨胀
 - **性格系统** — 勤快度/探索度/严谨度影响路径选择，支持 AI 自然语言生成
 - **知识学习** — 输入主题自动生成知识图谱，Scholar 拆解为结构化 DAG
 - **图谱进化** — 任务完成后自动蒸馏新知识，未使用的边每 6 小时自动衰减
 - **难度感知** — 6 种难度类型 × 性格维度的 softmax 加权计算
 - **实时推送** — WebSocket 实时展示思考过程（Leader 决策 → Agent 输出 → Boss 评审）
-- **工具系统** — 12 种内置工具（网页搜索、代码执行、记忆读写、浏览器等），Agent 自主调用，结构化可视化展示每次工具调用的参数、结果和耗时
+- **工具系统** — 18 种内置工具（网页搜索、代码执行、记忆读写、浏览器、文件读写编辑、代码搜索等），Agent 自主调用，结构化可视化展示每次工具调用的参数、结果和耗时
+- **Vibe Coding 工作流** — 文件读取/写入/编辑、代码搜索（ripgrep 集成）、文件查找、目录列表，支持 diff 视图和终端风格输出
+- **开发工具管理** — 设置中一键安装 ripgrep 等开发工具，增强 LLM 编码能力
 - **LLM 容错** — 自动重试（429/5xx）、指数退避、请求超时控制，支持 Retry-After
 - **国际化** — 内置中英文双语支持，设置中一键切换
 - **用户系统** — JWT 认证，多用户数据隔离
@@ -79,6 +82,7 @@
 1. 加载性格维度 → 计算容忍阈值
 2. 从性格节点出发，Leader 循环决策（最多 50 步）：
    获取出边 → 计算感知难度 → 过滤超阈值边 → Leader 选择或停止
+   supervised 模式下每步保存快照，用户可回退到任意历史节点重新选择
 3. 拼接路径记忆 → 注入性格 prompt → Agent 流式执行（可调用工具）
 4. Boss 验证：
    ✅ 通过 → 调低路径难度(×0.95)，智能蒸馏新知识（去重 + 条件过滤）
@@ -249,13 +253,16 @@ User Query → Leader pathfinds in graph → Collect memories along path → Age
 
 - **Multi-Role LLM Collaboration** — Leader pathfinds, Agent executes, Boss verifies, Scholar learns, Evaluator assesses
 - **Directed Memory Graph** — Visual knowledge network with drag-and-drop editing, auto-layout, viewport culling & edge aggregation
+- **Path Backtrack & Re-select** — Return to any historical node and re-select path in supervised/plan mode, no need to restart from scratch
 - **Smart Knowledge Distillation** — Creates nodes only when new features/constraints/knowledge are discovered, with title deduplication to prevent bloat
 - **Personality System** — Diligence/Exploration/Rigor affect path selection, supports AI natural language generation
 - **Knowledge Learning** — Input a topic to auto-generate knowledge graph, Scholar decomposes into structured DAG
 - **Graph Evolution** — Auto-distills new knowledge after task completion, unused edges decay every 6 hours
 - **Difficulty Perception** — 6 difficulty types × personality dimensions with softmax weighted calculation
 - **Real-time Streaming** — WebSocket live display of thinking process (Leader decision → Agent output → Boss review)
-- **Tool System** — 12 built-in tools (web search, code execution, memory read/write, browser, etc.), Agent autonomously invokes with structured visualization of each tool call's parameters, results, and duration
+- **Tool System** — 18 built-in tools (web search, code execution, memory read/write, browser, file read/write/edit, code search, etc.), Agent autonomously invokes with structured visualization of each tool call's parameters, results, and duration
+- **Vibe Coding Workflow** — File read/write/edit, code search (ripgrep integration), file find, directory listing, with diff view and terminal-style output
+- **Dev Tool Management** — One-click install of ripgrep and other dev tools in settings to enhance LLM coding capabilities
 - **LLM Fault Tolerance** — Auto-retry (429/5xx), exponential backoff, request timeout control, Retry-After support
 - **Internationalization** — Built-in Chinese/English bilingual support, one-click switch in settings
 - **User System** — JWT authentication, multi-user data isolation
@@ -297,6 +304,7 @@ User Query → Leader pathfinds in graph → Collect memories along path → Age
 1. Load personality dimensions → Calculate tolerance threshold
 2. Starting from personality node, Leader decision loop (max 50 steps):
    Get outgoing edges → Compute perceived difficulty → Filter edges above threshold → Leader selects or stops
+   In supervised mode, each step saves a snapshot; user can return to any historical node and re-select
 3. Concatenate path memories → Inject personality prompt → Agent streams execution (can invoke tools)
 4. Boss verification:
    ✅ Passed → Lower path difficulty (×0.95), smart knowledge distillation (dedup + conditional filtering)

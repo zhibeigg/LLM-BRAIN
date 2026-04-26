@@ -5,21 +5,23 @@ import {
   Code as CodeIcon,
   Memory as MemoryIcon,
   Build as BuildIcon,
+  DataObject as CodingIcon,
   CheckCircle as SuccessIcon,
   Error as ErrorIcon,
   ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material'
 import type { ToolCallPayload } from '../../types'
 import { useColors } from '../../ThemeContext'
+import { CodingToolCard } from './CodingToolCard'
 
 /* ── 工具类别图标映射 ── */
 
-const TOOL_CATEGORY: Record<string, 'search' | 'code' | 'memory' | 'utility'> = {
+const TOOL_CATEGORY: Record<string, 'search' | 'code' | 'memory' | 'utility' | 'coding'> = {
   web_search: 'search',
   url_reader: 'search',
   browser: 'search',
   code_executor: 'code',
-  terminal: 'code',
+  terminal: 'coding',
   memory_search: 'memory',
   memory_write: 'memory',
   node_edit: 'memory',
@@ -27,6 +29,12 @@ const TOOL_CATEGORY: Record<string, 'search' | 'code' | 'memory' | 'utility'> = 
   node_list: 'memory',
   calculator: 'utility',
   share_file: 'utility',
+  file_read: 'coding',
+  file_write: 'coding',
+  file_edit: 'coding',
+  file_search: 'coding',
+  file_glob: 'coding',
+  file_list: 'coding',
 }
 
 const CATEGORY_ICON = {
@@ -34,6 +42,7 @@ const CATEGORY_ICON = {
   code: CodeIcon,
   memory: MemoryIcon,
   utility: BuildIcon,
+  coding: CodingIcon,
 }
 
 function useCategoryColor() {
@@ -43,6 +52,7 @@ function useCategoryColor() {
     code: c.toolCode,
     memory: c.toolMemory,
     utility: c.toolUtility,
+    coding: c.toolCoding,
   }
 }
 
@@ -111,6 +121,20 @@ export function ToolCallCard({ data }: { data: ToolCallPayload }) {
   const parsedArgs = useMemo(() => {
     try { return JSON.parse(data.arguments) } catch { return null }
   }, [data.arguments])
+
+  // Coding 工具委托给 CodingToolCard 渲染
+  if (category === 'coding' && parsedArgs) {
+    return (
+      <CodingToolCard
+        toolName={data.toolName}
+        args={parsedArgs}
+        result={data.result}
+        success={data.success}
+        durationMs={data.durationMs}
+        phase={data.phase}
+      />
+    )
+  }
 
   return (
     <Box sx={{ borderRadius: '8px', border: `1px solid ${t.border}`, overflow: 'hidden', my: 0.5 }}>

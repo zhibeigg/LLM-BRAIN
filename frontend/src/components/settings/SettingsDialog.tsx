@@ -23,6 +23,7 @@ import type { FontFamily, SendKey } from '../../stores/settingsStore'
 import type { ExecutionMode } from '../../types'
 import { useUpdater } from '../../hooks/useUpdater'
 import { useI18n } from '../../i18n'
+import { DevToolsPanel } from './DevToolsPanel'
 
 interface SettingsDialogProps {
   open: boolean
@@ -361,6 +362,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               <Tab label="LLM 提供商" />
               <Tab label="角色配置" />
               <Tab label="工具" />
+              <Tab label="开发工具" />
               <Tab label="关于" />
             </Tabs>
           </Box>
@@ -770,6 +772,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
             {/* ── Tab 7: 关于 ── */}
             {tab === 7 && (
+              <DevToolsPanel />
+            )}
+
+            {tab === 8 && (
               <Box>
                 <Paper elevation={0} sx={{ p: 3, mb: 3, bgcolor: c.bgCard, border: `1px solid ${c.border}`, textAlign: 'center' }}>
                   <Typography variant="h5" sx={{ fontWeight: 700, color: c.text, mb: 1 }}>

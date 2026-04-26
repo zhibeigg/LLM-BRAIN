@@ -1,6 +1,7 @@
 import { BossRole } from '../roles/boss.js'
 import { broadcast } from '../../ws/server.js'
 import { getHistoryByTaskPrompt, createHistory } from '../../db/execution-history.js'
+import { getRoleConfig } from '../../db/llm-config.js'
 import type { BossVerdictPayload, LLMTrace } from '../../types/index.js'
 
 /**
@@ -27,6 +28,12 @@ export class BossOrchestrator {
     isLoop: boolean
     status: 'success' | 'failure' | 'loop_detected'
   }> {
+    // 前置检查：Boss LLM 是否已配置
+    if (!getRoleConfig('boss')) {
+      broadcast('error', { message: '请先在设置中为 Boss 角色配置 LLM 模型' })
+      return { passed: true, feedback: 'Boss 未配置，默认通过', isLoop: false, status: 'success' }
+    }
+
     const retryHistory = getHistoryByTaskPrompt(taskPrompt)
     const bossInput = JSON.stringify({
       originalTask: taskPrompt, agentResult,

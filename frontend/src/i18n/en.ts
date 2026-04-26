@@ -24,6 +24,12 @@ export const en: NestedMessages = {
     reject: 'Reject',
     allow: 'Allow',
     remove: 'Remove',
+    returnTo: 'Return',
+    returnToNode: 'Return to this node and re-select path',
+    selectReturnTarget: 'Select return target node:',
+    clickNodeToReturn: 'Click a node in the path to return and re-select from there',
+    leaderReturn: 'Returned to node: {title}',
+    leaderReturnReason: '{reason} (step {step})',
   },
 
   // ── Auth ──
@@ -385,5 +391,25 @@ export const en: NestedMessages = {
     tabPersonality: 'Personality',
     openSidebar: 'Open sidebar',
     subtitle: 'Directed Memory Graph Agent',
+  },
+
+  // ── Dev Tools ──
+  devTools: {
+    title: 'Dev Tools',
+    description: 'Install dev tools to enhance LLM coding capabilities',
+    refresh: 'Refresh',
+    installed: 'Installed',
+    notInstalled: 'Not installed',
+    installing: 'Installing',
+    install: 'Install',
+    reinstall: 'Reinstall',
+    manualInstall: 'Manual install required',
+    // Tool names
+    file_read: 'File Read',
+    file_write: 'File Write',
+    file_edit: 'File Edit',
+    file_search: 'Code Search',
+    file_glob: 'File Find',
+    file_list: 'Directory List',
   },
 }

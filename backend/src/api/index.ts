@@ -12,6 +12,7 @@ import { learnRouter } from './learn.js'
 import { chatSessionsRouter } from './chat-sessions.js'
 import { toolsRouter } from './tools.js'
 import { fsRouter } from './fs.js'
+import { devToolsRouter } from './dev-tools.js'
 
 export const apiRouter = Router()
 
@@ -28,3 +29,4 @@ apiRouter.use('/learn', learnRouter)
 apiRouter.use('/chat-sessions', chatSessionsRouter)
 apiRouter.use('/tools', toolsRouter)
 apiRouter.use('/fs', fsRouter)
+apiRouter.use('/dev-tools', devToolsRouter)

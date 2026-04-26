@@ -9,6 +9,7 @@ import type {
   DifficultyPersonalityMapping,
   DifficultyType,
   ToolDefinition,
+  DevToolInfo,
 } from '../types'
 import { getToken } from '../stores/authStore'
 
@@ -324,4 +325,21 @@ export interface DirEntry {
 export const fsApi = {
   listDirs: (path?: string) =>
     request<{ current: string; dirs: DirEntry[] }>(`/fs/list-dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+}
+
+// ===== 开发工具 API =====
+
+export const devToolsApi = {
+  getAll: () =>
+    request<{ tools: DevToolInfo[] }>('/dev-tools'),
+  check: (toolId: string) =>
+    request<{ id: string; installed: boolean; version?: string; path?: string }>('/dev-tools/check', {
+      method: 'POST',
+      body: JSON.stringify({ toolId }),
+    }),
+  install: (toolId: string) =>
+    request<{ id: string; installed: boolean; version?: string; path?: string }>('/dev-tools/install', {
+      method: 'POST',
+      body: JSON.stringify({ toolId }),
+    }),
 }

@@ -87,6 +87,17 @@ export const enhancedDarkColors = {
   successHover: '#3DA05E',   // 成功按钮 hover
   errorHover: '#D04050',     // 错误按钮 hover
   warningHover: '#D0A840',   // 警告按钮 hover
+
+  // 语义色 — Coding 工具
+  toolCoding: '#38BDF8',     // 编码工具主色（天蓝）
+  diffAdd: '#1A2E1A',        // diff 增加行背景
+  diffAddText: '#6EE7A0',    // diff 增加行文字
+  diffRemove: '#2E1A1A',     // diff 删除行背景
+  diffRemoveText: '#FCA5A5', // diff 删除行文字
+  diffLineNum: '#6A6A74',    // diff 行号
+  terminalBg: '#0C0C10',     // 终端输出背景
+  terminalText: '#6EE7A0',   // 终端输出文字
+  filePathText: '#7DD3FC',   // 文件路径文字色
 }
 
 // ============================================================
@@ -174,6 +185,17 @@ export const enhancedLightColors = {
   successHover: '#188844',   // 成功按钮 hover
   errorHover: '#C02035',     // 错误按钮 hover
   warningHover: '#C07000',   // 警告按钮 hover
+
+  // 语义色 — Coding 工具
+  toolCoding: '#0284C7',     // 编码工具主色（天蓝）
+  diffAdd: '#DCFCE7',        // diff 增加行背景
+  diffAddText: '#166534',    // diff 增加行文字
+  diffRemove: '#FEE2E2',     // diff 删除行背景
+  diffRemoveText: '#991B1B', // diff 删除行文字
+  diffLineNum: '#9CA3AF',    // diff 行号
+  terminalBg: '#F1F5F9',     // 终端输出背景
+  terminalText: '#166534',   // 终端输出文字
+  filePathText: '#0369A1',   // 文件路径文字色
 }
 
 // ============================================================

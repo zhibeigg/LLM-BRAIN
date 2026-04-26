@@ -1,14 +1,13 @@
-import type { ExecutionMode, PersonalityDimension, DifficultyPersonalityMapping, MemoryNode } from '../../types/index.js'
+import type { ExecutionMode, PersonalityDimension, DifficultyPersonalityMapping, MemoryNode, ExecutionSnapshot } from '../../types/index.js'
 import type { OpenAIToolDef } from '../providers/base.js'
 import { broadcast } from '../../ws/server.js'
-import { randomUUID } from 'crypto'
 import { LeaderRole } from '../roles/leader.js'
 import { getEdgesBySourceId, updateEdge } from '../../db/edges.js'
 import { getNodeById } from '../../db/nodes.js'
-import { getDimensionsByBrainId } from '../../db/personality.js'
-import { getMappings } from '../../db/difficulty-mapping.js'
 import { computePerceivedDifficulty } from '../../core/difficulty/engine.js'
-import type { LeaderStepPayload, LeaderDecisionPayload, StepConfirmPayload, LLMTrace } from '../../types/index.js'
+import { getRoleConfig } from '../../db/llm-config.js'
+import type { LeaderStepPayload, LeaderDecisionPayload, LLMTrace, LeaderReturnPayload } from '../../types/index.js'
+import type { ApprovalResult } from './ApprovalManager.js'
 
 /**
  * 路径难度调整器
@@ -69,20 +68,14 @@ export class DifficultyAdjuster {
 
 /**
  * Leader 决策编排器
- * 职责：路径选择决策循环
+ * 职责：路径选择决策循环，支持回退到历史节点重新选择
  */
 export class LeaderOrchestrator {
   private leader = new LeaderRole()
 
   /**
    * 执行 Leader 决策循环
-   * @param taskPrompt 任务提示
-   * @param brainId 脑图ID
-   * @param dimensions 个性维度
-   * @param mappings 难度映射
-   * @param mode 执行模式
-   * @param waitForApproval 等待审批的回调函数
-   * @returns 路径决策结果
+   * @param waitForApproval 三态审批回调：approve / reject / return_to
    */
   async executeDecisionLoop(
     taskPrompt: string,
@@ -90,7 +83,7 @@ export class LeaderOrchestrator {
     dimensions: PersonalityDimension[],
     mappings: DifficultyPersonalityMapping[],
     mode: ExecutionMode,
-    waitForApproval: (requestId: string, description: string) => Promise<boolean>
+    waitForApproval: (description: string, snapshots: ExecutionSnapshot[]) => Promise<ApprovalResult>
   ): Promise<{
     visitedPath: string[]
     collectedMemories: MemoryNode[]
@@ -101,13 +94,31 @@ export class LeaderOrchestrator {
     if (!startNode && allNodes.length > 0) startNode = allNodes[0]
     if (!startNode) throw new Error('图谱中没有任何节点')
 
+    // 前置检查：Leader LLM 是否已配置
+    if (!getRoleConfig('leader')) {
+      broadcast('error', { message: '请先在设置中为 Leader 角色配置 LLM 模型' })
+      return { visitedPath: [], collectedMemories: [], totalSteps: 0 }
+    }
+
     const visitedPath: string[] = []
     const collectedMemories: MemoryNode[] = []
+    /** 快照栈：每步保存一个快照，用于回退 */
+    const snapshots: ExecutionSnapshot[] = []
     let currentNode = startNode
     let totalSteps = 0
     const MAX_STEPS = 50
 
     while (totalSteps < MAX_STEPS) {
+      // ── 保存快照（在将当前节点加入路径之前） ──
+      const stepIndex = visitedPath.length
+      snapshots.push({
+        stepIndex,
+        nodeId: currentNode.id,
+        nodeTitle: currentNode.title,
+        visitedPath: [...visitedPath],
+        collectedMemoryIds: collectedMemories.map(n => n.id),
+      })
+
       visitedPath.push(currentNode.id)
       collectedMemories.push(currentNode)
       totalSteps++
@@ -115,6 +126,7 @@ export class LeaderOrchestrator {
       const outEdges = getEdgesBySourceId(currentNode.id)
       if (outEdges.length === 0) {
         broadcast('leader_step', {
+          stepIndex,
           currentNodeId: currentNode.id,
           candidates: [],
           thinking: '',
@@ -172,12 +184,10 @@ export class LeaderOrchestrator {
       const parseLeaderDecision = (raw: unknown): typeof decision => {
         const obj = raw as Record<string, unknown>
 
-        // 检测是否是有效的决策 JSON（必须有 action 或 edgeId）
         const hasAction = 'action' in obj
         const hasEdgeId = 'edgeId' in obj || 'selectedEdgeId' in obj || 'edge_id' in obj || 'chosenEdgeId' in obj
 
         if (!hasAction && !hasEdgeId) {
-          // LLM 返回了无关内容（如对话回复），视为无效，默认 continue 选第一个未访问的候选
           const unvisited = candidates.filter(c => !visitedPath.includes(c.edge.targetId))
           const fallback = unvisited[0] ?? candidates[0]
           return {
@@ -275,6 +285,7 @@ export class LeaderOrchestrator {
 
       // 先发 leader_step（带完整 candidates + thinking + trace），再发 leader_decision
       broadcast('leader_step', {
+        stepIndex,
         currentNodeId: currentNode.id,
         candidates: candidatesPayload,
         thinking: decision.thinking || '',
@@ -287,20 +298,53 @@ export class LeaderOrchestrator {
         totalSteps,
       } satisfies LeaderDecisionPayload)
 
-      // supervised 模式：每步决策后等待确认
+      // ── supervised 模式：每步决策后等待确认（支持回退） ──
       if (mode === 'supervised' && decision.edgeId) {
-        const requestId = `step-${randomUUID()}`
-        broadcast('step_confirm', {
-          stepId: requestId,
-          type: 'leader_decision',
-          description: `Leader 选择路径 → ${candidates.find(c => c.edge.id === decision.edgeId)?.targetNode?.title || '未知'}`,
-        } satisfies StepConfirmPayload)
+        const approvalResult = await waitForApproval(
+          `Leader 选择路径 → ${candidates.find(c => c.edge.id === decision.edgeId)?.targetNode?.title || '未知'}`,
+          snapshots
+        )
 
-        const approved = await waitForApproval(requestId, `Leader 选择路径 → ${candidates.find(c => c.edge.id === decision.edgeId)?.targetNode?.title || '未知'}`)
-        if (!approved) {
+        if (approvalResult.action === 'reject') {
           broadcast('leader_decision', { chosenEdgeId: null, reason: '用户拒绝了此路径选择', totalSteps } satisfies LeaderDecisionPayload)
           break
         }
+
+        if (approvalResult.action === 'return_to' && approvalResult.returnToNodeId) {
+          // ── 回退到指定节点 ──
+          const targetSnapshot = snapshots.find(s => s.nodeId === approvalResult.returnToNodeId)
+          if (targetSnapshot) {
+            // 恢复快照状态
+            visitedPath.length = 0
+            visitedPath.push(...targetSnapshot.visitedPath)
+            collectedMemories.length = 0
+            for (const memId of targetSnapshot.collectedMemoryIds) {
+              const node = getNodeById(memId)
+              if (node) collectedMemories.push(node)
+            }
+            // 裁剪快照栈到回退点
+            const snapshotIdx = snapshots.indexOf(targetSnapshot)
+            snapshots.length = snapshotIdx
+
+            const returnNode = getNodeById(approvalResult.returnToNodeId)
+            if (returnNode) {
+              currentNode = returnNode
+              broadcast('leader_return', {
+                returnToNodeId: returnNode.id,
+                returnToNodeTitle: returnNode.title,
+                returnToStepIndex: targetSnapshot.stepIndex,
+                reason: '用户请求回退到此节点重新选择',
+              } satisfies LeaderReturnPayload)
+              // 不 break，继续 while 循环，Leader 将在该节点重新决策
+              continue
+            }
+          }
+          // 快照未找到，当作 reject 处理
+          broadcast('leader_decision', { chosenEdgeId: null, reason: '回退目标节点无效，终止路径选择', totalSteps } satisfies LeaderDecisionPayload)
+          break
+        }
+
+        // action === 'approve' → 继续正常流程
       }
 
       if (decision.action === 'stop' || !decision.edgeId) break

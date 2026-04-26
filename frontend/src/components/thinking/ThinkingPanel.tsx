@@ -20,6 +20,7 @@ import {
   Queue as QueueIcon,
   Build as BuildIcon,
   Stop as StopIcon,
+  Undo as UndoIcon,
 } from '@mui/icons-material'
 import { useQueueStore, useSessionStore, useTaskExecutionStore, useTaskStore } from '../../stores/taskStore'
 import { useGraphStore } from '../../stores/graphStore'
@@ -27,6 +28,7 @@ import type { ThinkingStep, ChatSession } from '../../stores/taskStore'
 import type {
   LeaderStepPayload,
   LeaderDecisionPayload,
+  LeaderReturnPayload,
   AgentStreamPayload,
   BossVerdictPayload,
   LearningProgressPayload,
@@ -42,6 +44,7 @@ import { ToolCallCard } from './ToolCallCard'
 const STEP_ICONS = {
   leader_step: { icon: ThinkIcon, label: 'Leader 思考' },
   leader_decision: { icon: RouteIcon, label: 'Leader 决策' },
+  leader_return: { icon: UndoIcon, label: 'Leader 回退' },
   agent_stream: { icon: AgentIcon, label: 'Agent 输出' },
   boss_verdict: { icon: BossIcon, label: 'Boss 评审' },
   learning_progress: { icon: LearnIcon, label: '知识学习' },
@@ -53,6 +56,7 @@ function useStepColors() {
   return {
     leader_step: c.stepLeader,
     leader_decision: c.primary,
+    leader_return: c.warning,
     agent_stream: c.primary,
     boss_verdict: c.stepBoss,
     learning_progress: c.stepLearn,
@@ -386,11 +390,11 @@ function formatSessionTime(ts: number) {
 
 /** 将连续的 leader_step + leader_decision 合并为路径选择组 */
 interface MergedStep {
-  kind: 'path_choice' | 'single'
+  kind: 'path_choice' | 'leader_return' | 'single'
   /** path_choice: leader_step + leader_decision */
   leaderStep?: ThinkingStep
   decision?: ThinkingStep
-  /** single: 其他类型 */
+  /** single / leader_return: 其他类型 */
   step?: ThinkingStep
 }
 
@@ -409,6 +413,9 @@ function mergeSteps(steps: ThinkingStep[]): MergedStep[] {
     } else if (cur.type === 'leader_decision') {
       // 孤立的 decision（不应该出现，兜底）
       result.push({ kind: 'single', step: cur })
+      i++
+    } else if (cur.type === 'leader_return') {
+      result.push({ kind: 'leader_return', step: cur })
       i++
     } else {
       result.push({ kind: 'single', step: cur })
@@ -986,6 +993,30 @@ function EmptyState() {
   )
 }
 
+/* ── Leader 回退卡片 ── */
+
+function LeaderReturnCard({ step }: { step: ThinkingStep }) {
+  const c = useColors()
+  const data = step.data as LeaderReturnPayload
+  return (
+    <Box sx={{
+      mb: 1, p: 1.5, borderRadius: '8px',
+      bgcolor: `${c.warning}08`, border: `1px solid ${c.warning}30`,
+      display: 'flex', alignItems: 'center', gap: 1,
+    }}>
+      <UndoIcon sx={{ fontSize: 16, color: c.warning }} />
+      <Box sx={{ flex: 1 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 600, color: c.warning }}>
+          回退到节点：{data.returnToNodeTitle}
+        </Typography>
+        <Typography sx={{ fontSize: 11, color: c.textSecondary, mt: 0.3 }}>
+          {data.reason}（步骤 {data.returnToStepIndex + 1}）
+        </Typography>
+      </Box>
+    </Box>
+  )
+}
+
 /* ── 路径概览条 ── */
 
 function PathOverview({ mergedSteps }: { mergedSteps: MergedStep[] }) {
@@ -1133,6 +1164,10 @@ export function ThinkingPanel() {
   const rejectPlan = useTaskStore((s) => s.rejectPlan)
   const approveStep = useTaskStore((s) => s.approveStep)
   const rejectStep = useTaskStore((s) => s.rejectStep)
+  const returnToNode = useTaskStore((s) => s.returnToNode)
+  const returnToPlanNode = useTaskStore((s) => s.returnToPlanNode)
+
+  const retryCurrentTask = useTaskStore((s) => s.retryCurrentTask)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomAnchorRef = useRef<HTMLDivElement>(null)
@@ -1140,6 +1175,8 @@ export function ThinkingPanel() {
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const historyScrollSnapshotRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [returnMenuOpen, setReturnMenuOpen] = useState(false)
+  const [planReturnMenuOpen, setPlanReturnMenuOpen] = useState(false)
 
   const busy = isRunning || isLearning
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
@@ -1340,6 +1377,18 @@ export function ThinkingPanel() {
       {error && !isViewingHistory && (
         <Alert
           severity="error"
+          action={
+            <Button
+              size="small"
+              onClick={retryCurrentTask}
+              sx={{
+                fontSize: 12, textTransform: 'none', fontWeight: 600,
+                color: c.error, '&:hover': { bgcolor: `${c.error}15` },
+              }}
+            >
+              重试
+            </Button>
+          }
           sx={{
             mb: 1.5, fontSize: 13, bgcolor: `${c.error}10`, color: c.error,
             border: `1px solid ${c.error}30`, '& .MuiAlert-icon': { color: c.error }, flexShrink: 0,
@@ -1366,21 +1415,32 @@ export function ThinkingPanel() {
             {pendingPlan.path.map((node, i) => (
               <Box key={node.nodeId} sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
                 {i > 0 && <Typography sx={{ fontSize: 11, color: c.textMuted }}>→</Typography>}
-                <Chip
-                  label={node.nodeTitle}
-                  size="small"
-                  sx={{
-                    height: 22, fontSize: 11,
-                    bgcolor: node.nodeType === 'personality' ? `${c.primary}15` : `${c.secondary}15`,
-                    color: node.nodeType === 'personality' ? c.primary : c.secondary,
-                    border: `1px solid ${node.nodeType === 'personality' ? `${c.primary}30` : `${c.secondary}30`}`,
-                  }}
-                />
+                <Tooltip title={`回退到此节点重新选择`} arrow>
+                  <Chip
+                    label={node.nodeTitle}
+                    size="small"
+                    clickable
+                    onClick={() => {
+                      returnToPlanNode(node.nodeId)
+                      setPlanReturnMenuOpen(false)
+                    }}
+                    sx={{
+                      height: 22, fontSize: 11, cursor: 'pointer',
+                      bgcolor: node.nodeType === 'personality' ? `${c.primary}15` : `${c.secondary}15`,
+                      color: node.nodeType === 'personality' ? c.primary : c.secondary,
+                      border: `1px solid ${node.nodeType === 'personality' ? `${c.primary}30` : `${c.secondary}30`}`,
+                      '&:hover': { bgcolor: `${c.warning}20`, borderColor: `${c.warning}50` },
+                    }}
+                  />
+                </Tooltip>
               </Box>
             ))}
           </Box>
-          <Typography sx={{ fontSize: 11, color: c.textMuted, mb: 1.5 }}>
+          <Typography sx={{ fontSize: 11, color: c.textMuted, mb: 0.5 }}>
             共 {pendingPlan.totalSteps} 步，{pendingPlan.path.length} 个节点
+          </Typography>
+          <Typography sx={{ fontSize: 10, color: c.textDim, mb: 1.5 }}>
+            点击路径中的节点可回退到该节点重新选择路径
           </Typography>
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button
@@ -1406,19 +1466,54 @@ export function ThinkingPanel() {
         <Box sx={{
           mb: 1.5, p: 1.5, borderRadius: '8px', flexShrink: 0,
           bgcolor: `${c.warning}08`, border: `1px solid ${c.warning}30`,
-          display: 'flex', alignItems: 'center', gap: 1.5,
         }}>
-          <Typography sx={{ fontSize: 12, color: c.text, flex: 1 }}>
-            {pendingStep.description}
-          </Typography>
-          <Button size="small" variant="contained" onClick={approveStep}
-            sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, bgcolor: c.success, '&:hover': { bgcolor: c.successHover } }}>
-            允许
-          </Button>
-          <Button size="small" variant="outlined" onClick={rejectStep}
-            sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, borderColor: c.error, color: c.error }}>
-            拒绝
-          </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: pendingStep.returnableNodes?.length ? 1 : 0 }}>
+            <Typography sx={{ fontSize: 12, color: c.text, flex: 1 }}>
+              {pendingStep.description}
+            </Typography>
+            <Button size="small" variant="contained" onClick={approveStep}
+              sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, bgcolor: c.success, '&:hover': { bgcolor: c.successHover } }}>
+              允许
+            </Button>
+            <Button size="small" variant="outlined" onClick={rejectStep}
+              sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, borderColor: c.error, color: c.error }}>
+              拒绝
+            </Button>
+            {pendingStep.returnableNodes && pendingStep.returnableNodes.length > 0 && (
+              <Button size="small" variant="outlined" onClick={() => setReturnMenuOpen(!returnMenuOpen)}
+                startIcon={<UndoIcon sx={{ fontSize: 14 }} />}
+                sx={{ fontSize: 11, textTransform: 'none', minWidth: 70, borderColor: c.warning, color: c.warning, '&:hover': { bgcolor: `${c.warning}10` } }}>
+                回退
+              </Button>
+            )}
+          </Box>
+          <Collapse in={returnMenuOpen}>
+            {pendingStep.returnableNodes && pendingStep.returnableNodes.length > 0 && (
+              <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${c.warning}20` }}>
+                <Typography sx={{ fontSize: 11, color: c.textSecondary, mb: 0.5 }}>选择回退目标节点：</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                  {pendingStep.returnableNodes.map((node) => (
+                    <Chip
+                      key={node.nodeId}
+                      label={`${node.stepIndex + 1}. ${node.nodeTitle}`}
+                      size="small"
+                      clickable
+                      onClick={() => {
+                        returnToNode(node.nodeId)
+                        setReturnMenuOpen(false)
+                      }}
+                      sx={{
+                        height: 22, fontSize: 11, cursor: 'pointer',
+                        bgcolor: `${c.warning}10`, color: c.warning,
+                        border: `1px solid ${c.warning}30`,
+                        '&:hover': { bgcolor: `${c.warning}25` },
+                      }}
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
+          </Collapse>
         </Box>
       )}
 
@@ -1450,6 +1545,9 @@ export function ThinkingPanel() {
                       isBusy={!isViewingHistory && busy}
                     />
                   )
+                }
+                if (merged.kind === 'leader_return' && merged.step) {
+                  return <LeaderReturnCard key={merged.step.id} step={merged.step} />
                 }
                 if (merged.step) {
                   // tool_call 类型直接渲染为 ToolCallCard（自带卡片样式）

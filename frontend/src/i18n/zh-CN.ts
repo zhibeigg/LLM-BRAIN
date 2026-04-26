@@ -24,6 +24,12 @@ export const zhCN: NestedMessages = {
     reject: '拒绝',
     allow: '允许',
     remove: '移除',
+    returnTo: '回退',
+    returnToNode: '回退到此节点重新选择',
+    selectReturnTarget: '选择回退目标节点：',
+    clickNodeToReturn: '点击路径中的节点可回退到该节点重新选择路径',
+    leaderReturn: '回退到节点：{title}',
+    leaderReturnReason: '{reason}（步骤 {step}）',
   },
 
   // ── 认证 ──
@@ -385,5 +391,25 @@ export const zhCN: NestedMessages = {
     tabPersonality: '性格',
     openSidebar: '打开侧栏',
     subtitle: '有向记忆图智能体',
+  },
+
+  // ── 开发工具 ──
+  devTools: {
+    title: '开发工具',
+    description: '安装开发工具以增强 LLM 的编码能力',
+    refresh: '刷新',
+    installed: '已安装',
+    notInstalled: '未安装',
+    installing: '安装中',
+    install: '安装',
+    reinstall: '重新安装',
+    manualInstall: '需手动安装',
+    // 工具名
+    file_read: '文件读取',
+    file_write: '文件写入',
+    file_edit: '文件编辑',
+    file_search: '代码搜索',
+    file_glob: '文件查找',
+    file_list: '目录列表',
   },
 }
