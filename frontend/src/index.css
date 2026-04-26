@@ -296,6 +296,27 @@ html, body, #root {
   }
 }
 
+/* 候选项等待态脉冲 */
+@keyframes candidatePulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+/* 打勾图标弹入 */
+@keyframes checkIn {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.candidate-pulse {
+  animation: candidatePulse 1.4s ease-in-out infinite;
+}
+
+.candidate-check-in {
+  animation: checkIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* 步骤卡片样式类 */
 .step-card {
   animation: stepSlideIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards;
@@ -400,11 +421,17 @@ html, body, #root {
   animation: signalFieldBreathing 7s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
-.graph-signal-status {
+.graph-signal-stack {
   position: absolute;
   top: 12px;
   right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: min(250px, calc(100% - 24px));
+}
+
+.graph-signal-status {
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--signal-primary) 26%, var(--signal-border));
   border-radius: 14px;
@@ -472,10 +499,6 @@ html, body, #root {
 }
 
 .graph-signal-event {
-  position: absolute;
-  right: 12px;
-  top: 118px;
-  width: min(250px, calc(100% - 24px));
   padding: 9px 11px;
   border: 1px solid color-mix(in srgb, var(--event-color, var(--signal-primary)) 38%, var(--signal-border));
   border-radius: 12px;
@@ -520,7 +543,7 @@ html, body, #root {
 .graph-signal-log {
   position: absolute;
   left: 14px;
-  bottom: 44px;
+  bottom: 164px;
   display: grid;
   gap: 6px;
   width: min(260px, calc(100% - 168px));
@@ -559,6 +582,11 @@ html, body, #root {
   white-space: nowrap;
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @keyframes signalFieldBreathing {
   0%, 100% { opacity: 0.24; transform: scale(0.96); }
   50% { opacity: 0.46; transform: scale(1.04); }
@@ -575,8 +603,7 @@ html, body, #root {
 }
 
 @media (max-width: 767px) {
-  .graph-signal-status,
-  .graph-signal-event {
+  .graph-signal-stack {
     display: none;
   }
 

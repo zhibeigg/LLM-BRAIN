@@ -27,6 +27,7 @@ export interface AppSettings {
   showMinimap: boolean
   graphSnapToGrid: boolean
   graphAnimateEdges: boolean
+  graphAutoFocusLeader: boolean
 
   // 执行
   defaultExecutionMode: ExecutionMode
@@ -47,6 +48,7 @@ const defaultSettings: AppSettings = {
   showMinimap: true,
   graphSnapToGrid: false,
   graphAnimateEdges: true,
+  graphAutoFocusLeader: true,
   defaultExecutionMode: 'auto',
   defaultAutoReview: false,
   maxRetries: 3,

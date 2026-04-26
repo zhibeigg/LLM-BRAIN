@@ -23,7 +23,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useGraphStore } from '../../stores/graphStore'
 import { useBrainStore } from '../../stores/brainStore'
-import { useTaskStore } from '../../stores/taskStore'
+import { useTaskStore, useTaskExecutionStore } from '../../stores/taskStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { DIFFICULTY_TYPE_LABELS, type DifficultyType } from '../../types'
 import { MemoryNodeComponent } from './MemoryNodeComponent'
@@ -31,8 +31,9 @@ import { AnimatedEdge } from './AnimatedEdge'
 import { ContextMenu } from './ContextMenu'
 import { GraphSignalOverlay } from './GraphSignalOverlay'
 
-import { useColors, useThemeMode } from '../../ThemeContext'
+import { useColors } from '../../ThemeContext'
 import { useResponsive } from '../../hooks/useResponsive'
+import { useLeaderFocus } from '../../hooks/useLeaderFocus'
 
 const nodeTypes = {
   memoryNode: MemoryNodeComponent,
@@ -108,18 +109,77 @@ function computeVisibleNodeIds(
 }
 
 /**
+ * 计算边是否与视窗相交（线段-矩形相交检测）
+ * 即使两端节点都在视窗外，只要边穿过视窗就返回 true
+ */
+function edgeIntersectsViewport(
+  sourceNode: Node,
+  targetNode: Node,
+  viewBounds: { left: number; top: number; right: number; bottom: number }
+): boolean {
+  const sx = sourceNode.position.x + ((sourceNode.measured?.width ?? sourceNode.width ?? 180) as number) / 2
+  const sy = sourceNode.position.y + ((sourceNode.measured?.height ?? sourceNode.height ?? 80) as number) / 2
+  const tx = targetNode.position.x + ((targetNode.measured?.width ?? targetNode.width ?? 180) as number) / 2
+  const ty = targetNode.position.y + ((targetNode.measured?.height ?? targetNode.height ?? 80) as number) / 2
+
+  const { left, top, right, bottom } = viewBounds
+
+  // 快速检查：线段的 AABB 是否与视窗相交
+  const minX = Math.min(sx, tx)
+  const maxX = Math.max(sx, tx)
+  const minY = Math.min(sy, ty)
+  const maxY = Math.max(sy, ty)
+
+  if (maxX < left || minX > right || maxY < top || minY > bottom) return false
+
+  // 任一端点在视窗内
+  if (sx >= left && sx <= right && sy >= top && sy <= bottom) return true
+  if (tx >= left && tx <= right && ty >= top && ty <= bottom) return true
+
+  // Cohen-Sutherland 线段裁剪：检测线段是否穿过矩形
+  // 简化版：检测线段与矩形四条边的交点
+  const dx = tx - sx
+  const dy = ty - sy
+
+  const edges = [
+    { axis: 'x' as const, val: left },
+    { axis: 'x' as const, val: right },
+    { axis: 'y' as const, val: top },
+    { axis: 'y' as const, val: bottom },
+  ]
+
+  for (const edge of edges) {
+    if (edge.axis === 'x' && dx !== 0) {
+      const t = (edge.val - sx) / dx
+      if (t >= 0 && t <= 1) {
+        const iy = sy + t * dy
+        if (iy >= top && iy <= bottom) return true
+      }
+    } else if (edge.axis === 'y' && dy !== 0) {
+      const t = (edge.val - sy) / dy
+      if (t >= 0 && t <= 1) {
+        const ix = sx + t * dx
+        if (ix >= left && ix <= right) return true
+      }
+    }
+  }
+
+  return false
+}
+
+/**
  * 基于缩放级别聚合边
  * @param edges 所有边
  * @param nodes 所有节点
  * @param zoom 当前缩放级别
- * @param visibleNodeIds 可见节点 ID
+ * @param viewBounds 视窗边界（世界坐标）
  * @returns 聚合后的边
  */
 function aggregateEdges(
   edges: Edge[],
   nodes: Node[],
   zoom: number,
-  visibleNodeIds: Set<string>
+  viewBounds: { left: number; top: number; right: number; bottom: number }
 ): Edge[] {
   // 高缩放级别时显示所有边
   if (zoom >= EDGE_AGGRERATION_ZOOM_THRESHOLD) {
@@ -129,8 +189,17 @@ function aggregateEdges(
   // 低于阈值时进行边聚合
   const aggregationZoomFactor = 1 - (EDGE_AGGRERATION_ZOOM_THRESHOLD - zoom) / EDGE_AGGRERATION_ZOOM_THRESHOLD
 
-  // 只保留连接到可见节点的边
-  const filteredEdges = edges.filter(e => visibleNodeIds.has(e.source) || visibleNodeIds.has(e.target))
+  // 构建节点查找表
+  const nodeMap = new Map<string, Node>()
+  for (const n of nodes) nodeMap.set(n.id, n)
+
+  // 只保留与视窗相交的边
+  const filteredEdges = edges.filter(e => {
+    const sn = nodeMap.get(e.source)
+    const tn = nodeMap.get(e.target)
+    if (!sn || !tn) return false
+    return edgeIntersectsViewport(sn, tn, viewBounds)
+  })
 
   // 在低缩放下，将边聚合为超级边
   if (aggregationZoomFactor < 0.5) {
@@ -167,9 +236,9 @@ function aggregateEdges(
             aggregated: true,
             aggregatedCount: parallelEdges.length,
           },
-          markerEnd: { type: MarkerType.ArrowClosed, color: edge.markerEnd?.color ?? '#999' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: edge.markerEnd?.color ?? c.textMuted },
           label: `${parallelEdges.length} 条边`,
-          labelStyle: { fontSize: 10, fill: '#666' },
+          labelStyle: { fontSize: 10, fill: c.textMuted },
           style: { strokeDasharray: '5,5' },
         })
       } else {
@@ -203,6 +272,20 @@ function useViewportNodes(
     []
   )
 
+  // 计算视窗边界（世界坐标，带边距）
+  const viewBounds = useMemo(() => {
+    const { x, y, zoom } = viewport
+    const { width, height } = containerBounds
+    const marginX = width * VIEWPORT_MARGIN
+    const marginY = height * VIEWPORT_MARGIN
+    return {
+      left: -x / zoom - marginX,
+      top: -y / zoom - marginY,
+      right: (-x + width) / zoom + marginX,
+      bottom: (-y + height) / zoom + marginY,
+    }
+  }, [viewport, containerBounds])
+
   // 计算可见节点
   const visibleNodeIds = useMemo(
     () => computeVisibleNodeIds(nodes, viewport, containerBounds),
@@ -220,6 +303,7 @@ function useViewportNodes(
     visibleNodeIds,
     allNodes: nodes,
     viewport,
+    viewBounds,
     onMoveEnd,
   }
 }
@@ -231,12 +315,12 @@ function useViewportNodes(
 function useAggregatedEdges(
   edges: Edge[],
   nodes: Node[],
-  visibleNodeIds: Set<string>,
+  viewBounds: { left: number; top: number; right: number; bottom: number },
   zoom: number
 ) {
   const aggregatedEdges = useMemo(
-    () => aggregateEdges(edges, nodes, zoom, visibleNodeIds),
-    [edges, nodes, zoom, visibleNodeIds]
+    () => aggregateEdges(edges, nodes, zoom, viewBounds),
+    [edges, nodes, zoom, viewBounds]
   )
 
   return {
@@ -313,17 +397,15 @@ function ChineseControls({ onAutoLayout, isLayouting, isMobile }: ChineseControl
   )
 }
 
-/** 难度值 → 颜色（与 theme.ts 中的 diffEasy/diffMedium/diffHard 对应） */
-function diffColor(d: number): string {
-  if (d < 0.3) return '#4ADE80'   // diffEasy
-  if (d < 0.6) return '#FBBF24'   // diffMedium
-  return '#EF4444'                 // diffHard
+/** 难度值 → 颜色（使用主题语义 token） */
+function diffColor(d: number, c: { diffEasy: string; diffMedium: string; diffHard: string }): string {
+  if (d < 0.3) return c.diffEasy
+  if (d < 0.6) return c.diffMedium
+  return c.diffHard
 }
 
 function EdgeInfoPanel() {
   const c = useColors()
-  const { mode } = useThemeMode()
-  const isDark = mode === 'dark'
   const selectedEdgeId = useGraphStore((s) => s.selectedEdgeId)
   const edges = useGraphStore((s) => s.edges)
   const nodes = useGraphStore((s) => s.nodes)
@@ -341,15 +423,15 @@ function EdgeInfoPanel() {
       position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
       width: 360, maxWidth: 'calc(100% - 24px)',
       borderRadius: '10px', overflow: 'hidden', zIndex: 10,
-      bgcolor: isDark ? c.bgCard : '#FFFFFF',
+      bgcolor: c.bgCard,
       border: `1px solid ${c.border}`,
-      boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.5)' : '0 8px 24px rgba(0,0,0,0.12)',
+      boxShadow: `0 8px 24px ${c.shadow}`,
     }}>
       {/* 标题栏 */}
       <Box sx={{
         display: 'flex', alignItems: 'center', gap: 1,
         px: 1.5, py: 1,
-        bgcolor: isDark ? c.bgInput : c.bgHover,
+        bgcolor: c.bgInput,
         borderBottom: `1px solid ${c.border}`,
       }}>
         <Typography sx={{ fontSize: 12, color: c.textSecondary, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -368,9 +450,9 @@ function EdgeInfoPanel() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography sx={{ fontSize: 11, color: c.textMuted, width: 56, flexShrink: 0 }}>基础难度</Typography>
           <Box sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: c.border, overflow: 'hidden' }}>
-            <Box sx={{ width: `${edge.baseDifficulty * 100}%`, height: '100%', borderRadius: 3, bgcolor: diffColor(edge.baseDifficulty), transition: 'width 0.3s' }} />
+            <Box sx={{ width: `${edge.baseDifficulty * 100}%`, height: '100%', borderRadius: 3, bgcolor: diffColor(edge.baseDifficulty, c), transition: 'width 0.3s' }} />
           </Box>
-          <Typography sx={{ fontSize: 11, color: diffColor(edge.baseDifficulty), fontWeight: 600, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          <Typography sx={{ fontSize: 11, color: diffColor(edge.baseDifficulty, c), fontWeight: 600, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {(edge.baseDifficulty * 100).toFixed(0)}%
           </Typography>
         </Box>
@@ -379,9 +461,9 @@ function EdgeInfoPanel() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography sx={{ fontSize: 11, color: c.textMuted, width: 56, flexShrink: 0 }}>感知难度</Typography>
             <Box sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: c.border, overflow: 'hidden' }}>
-              <Box sx={{ width: `${perceived * 100}%`, height: '100%', borderRadius: 3, bgcolor: diffColor(perceived), transition: 'width 0.3s' }} />
+              <Box sx={{ width: `${perceived * 100}%`, height: '100%', borderRadius: 3, bgcolor: diffColor(perceived, c), transition: 'width 0.3s' }} />
             </Box>
-            <Typography sx={{ fontSize: 11, color: diffColor(perceived), fontWeight: 600, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            <Typography sx={{ fontSize: 11, color: diffColor(perceived, c), fontWeight: 600, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
               {(perceived * 100).toFixed(0)}%
             </Typography>
           </Box>
@@ -400,9 +482,9 @@ function EdgeInfoPanel() {
                   size="small"
                   sx={{
                     height: 20, fontSize: 10,
-                    bgcolor: `${diffColor(edge.baseDifficulty)}15`,
-                    color: diffColor(edge.baseDifficulty),
-                    border: `1px solid ${diffColor(edge.baseDifficulty)}30`,
+                    bgcolor: `${diffColor(edge.baseDifficulty, c)}15`,
+                    color: diffColor(edge.baseDifficulty, c),
+                    border: `1px solid ${diffColor(edge.baseDifficulty, c)}30`,
                   }}
                 />
               )
@@ -431,7 +513,6 @@ function EdgeInfoPanel() {
 
 function GraphCanvasInner() {
   const c = useColors()
-  const { mode } = useThemeMode()
   const { isMobile } = useResponsive()
   const {
     nodes: storeNodes,
@@ -454,6 +535,7 @@ function GraphCanvasInner() {
   const currentBrainId = useBrainStore((s) => s.currentBrainId)
   const activeEdgeIds = useTaskStore((s) => s.activeEdgeIds)
   const activeNodeId = useTaskStore((s) => s.activeNodeId)
+  const leaderPath = useTaskExecutionStore((s) => s.leaderPath)
   const showMinimap = useSettingsStore((s) => s.showMinimap)
   const graphSnapToGrid = useSettingsStore((s) => s.graphSnapToGrid)
   const graphAnimateEdges = useSettingsStore((s) => s.graphAnimateEdges)
@@ -483,16 +565,33 @@ function GraphCanvasInner() {
     return () => window.removeEventListener('resize', updateBounds)
   }, [])
 
+  // 计算 Leader 路径中的节点和边 ID 集合
+  const pathNodeIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const step of leaderPath) {
+      ids.add(step.nodeId)
+    }
+    return ids
+  }, [leaderPath])
+
+  const pathEdgeIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const step of leaderPath) {
+      if (step.edgeId) ids.add(step.edgeId)
+    }
+    return ids
+  }, [leaderPath])
+
   const initialRfNodes = useMemo<Node[]>(
     () =>
       storeNodes.map((node) => ({
         id: node.id,
         type: 'memoryNode' as const,
         position: { x: node.positionX, y: node.positionY },
-        data: { ...node, active: node.id === activeNodeId },
+        data: { ...node, active: node.id === activeNodeId, inPath: pathNodeIds.has(node.id) },
         selected: node.id === selectedNodeId,
       })),
-    [storeNodes, selectedNodeId, activeNodeId],
+    [storeNodes, selectedNodeId, activeNodeId, pathNodeIds],
   )
 
   const initialRfEdges = useMemo<Edge[]>(
@@ -508,30 +607,47 @@ function GraphCanvasInner() {
           difficultyTypes: edge.difficultyTypes,
           difficultyTypeWeights: edge.difficultyTypeWeights,
           active: activeEdgeIds.has(edge.id),
+          inPath: pathEdgeIds.has(edge.id),
           animate: graphAnimateEdges,
           thinkingContent: undefined,
         },
-        markerEnd: { type: MarkerType.ArrowClosed, color: activeEdgeIds.has(edge.id) ? c.primary : c.textMuted },
+        markerEnd: { type: MarkerType.ArrowClosed, color: activeEdgeIds.has(edge.id) ? c.primary : pathEdgeIds.has(edge.id) ? c.primary : c.textMuted },
       })),
-    [storeEdges, activeEdgeIds, graphAnimateEdges, c.primary, c.textMuted],
+    [storeEdges, activeEdgeIds, pathEdgeIds, graphAnimateEdges, c.primary, c.textMuted],
   )
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(initialRfNodes)
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(initialRfEdges)
 
   // 使用视窗感知 hook
-  const { visibleNodes, visibleNodeIds, viewport, onMoveEnd } = useViewportNodes(
+  const { visibleNodes, visibleNodeIds, viewport, viewBounds, onMoveEnd } = useViewportNodes(
     rfNodes,
     containerBounds
   )
+
+  // Leader 路径选择时自动聚焦
+  useLeaderFocus(rfNodes)
 
   // 使用边聚合 hook
   const { aggregatedEdges, isAggregated } = useAggregatedEdges(
     rfEdges,
     rfNodes,
-    visibleNodeIds,
+    viewBounds,
     viewport.zoom
   )
+
+  // 补充边引用的视窗外节点，确保跨视窗的边能正常渲染
+  const renderNodes = useMemo(() => {
+    const edgeNodeIds = new Set<string>()
+    for (const e of aggregatedEdges) {
+      edgeNodeIds.add(e.source)
+      edgeNodeIds.add(e.target)
+    }
+    // 找出边需要但不在 visibleNodes 中的节点
+    const extraNodes = rfNodes.filter(n => edgeNodeIds.has(n.id) && !visibleNodeIds.has(n.id))
+    if (extraNodes.length === 0) return visibleNodes
+    return [...visibleNodes, ...extraNodes]
+  }, [visibleNodes, visibleNodeIds, aggregatedEdges, rfNodes])
 
   // 更新节点时保持位置同步
   useEffect(() => {
@@ -679,7 +795,7 @@ function GraphCanvasInner() {
     <>
       <ReactFlow
         ref={containerRef}
-        nodes={visibleNodes}
+        nodes={renderNodes}
         edges={aggregatedEdges}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
@@ -720,14 +836,29 @@ function GraphCanvasInner() {
         ]}
       >
         <Background
-          color={graphSnapToGrid
-            ? (mode === 'dark' ? '#3a3d41' : '#C6C6CC')
-            : (mode === 'dark' ? '#26282b' : '#D1D1D6')
-          }
+          color={graphSnapToGrid ? c.borderLight : c.border}
           gap={graphSnapToGrid ? 20 : 24}
           size={graphSnapToGrid ? 1 : 1}
           variant={graphSnapToGrid ? BackgroundVariant.Lines : BackgroundVariant.Dots}
         />
+        {/* Leader 路径动画全局 keyframes（只注入一次） */}
+        <svg width="0" height="0" style={{ position: 'absolute' }}>
+          <defs>
+            <style>{`
+              @keyframes leader-path-flow {
+                from { stroke-dashoffset: 24; }
+                to { stroke-dashoffset: 0; }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                .react-flow__edge-animated-edge * {
+                  animation-duration: 0.01ms !important;
+                  animation-iteration-count: 1 !important;
+                  transition-duration: 0.01ms !important;
+                }
+              }
+            `}</style>
+          </defs>
+        </svg>
         <ChineseControls onAutoLayout={handleAutoLayout} isLayouting={isLayouting} isMobile={isMobile} />
         <GraphSignalOverlay />
         {/* 视窗状态指示器 */}
@@ -735,7 +866,7 @@ function GraphCanvasInner() {
           sx={{
             position: 'absolute',
             left: 12,
-            bottom: 12,
+            top: 12,
             px: 1,
             py: 0.5,
             borderRadius: 1,
@@ -743,8 +874,8 @@ function GraphCanvasInner() {
               ? `${c.primary}33` 
               : isAggregated 
                 ? `${c.warning}26` 
-                : 'rgba(0,0,0,0.3)',
-            color: isLayouting ? c.primary : isAggregated ? c.warning : '#999',
+                : c.overlay,
+            color: isLayouting ? c.primary : isAggregated ? c.warning : c.textMuted,
             fontSize: 10,
             fontFamily: 'monospace',
             pointerEvents: 'none',
@@ -752,7 +883,7 @@ function GraphCanvasInner() {
             gap: 1,
           }}
         >
-          <span>{visibleNodes.length}/{rfNodes.length}</span>
+          <span>{renderNodes.length}/{rfNodes.length}</span>
           {isLayouting && <span style={{ color: c.primary }}>布局 {Math.round(layoutProgress * 100)}%</span>}
           {isAggregated && <span style={{ color: c.warning }}>聚合</span>}
         </Box>
@@ -763,7 +894,7 @@ function GraphCanvasInner() {
             nodeColor={(node) =>
               node.data?.type === 'personality' ? c.primary : c.secondary
             }
-            maskColor={mode === 'dark' ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.08)'}
+            maskColor={c.overlay}
             nodeStrokeWidth={0}
             nodeBorderRadius={1}
             pannable

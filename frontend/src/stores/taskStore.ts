@@ -62,6 +62,11 @@ function dtoToSession(dto: ChatSessionDTO): ChatSession {
 // Store 1: 任务执行状态 (TaskExecutionStore)
 // ============================================================================
 
+export interface LeaderPathStep {
+  nodeId: string
+  edgeId: string | null
+}
+
 interface TaskExecutionState {
   isRunning: boolean
   isLearning: boolean
@@ -70,6 +75,7 @@ interface TaskExecutionState {
   agentOutput: string
   activeEdgeIds: Set<string>
   activeNodeId: string | null
+  leaderPath: LeaderPathStep[]
   error: string | null
   pendingPlan: PlanReadyPayload | null
   pendingStep: StepConfirmPayload | null
@@ -88,6 +94,8 @@ interface TaskExecutionActions {
   appendAgentOutput: (chunk: string) => void
   setActiveEdge: (edgeId: string | null) => void
   setActiveNode: (nodeId: string | null) => void
+  pushLeaderPathNode: (nodeId: string) => void
+  setLeaderPathEdge: (edgeId: string) => void
   setPendingPlan: (plan: PlanReadyPayload | null) => void
   setPendingStep: (step: StepConfirmPayload | null) => void
   approvePlan: () => void
@@ -106,6 +114,7 @@ const initialExecutionState: TaskExecutionState = {
   agentOutput: '',
   activeEdgeIds: new Set<string>(),
   activeNodeId: null,
+  leaderPath: [],
   error: null,
   pendingPlan: null,
   pendingStep: null,
@@ -146,6 +155,7 @@ export const useTaskExecutionStore = create<TaskExecutionStore>()(
         Object.assign(state, {
           ...initialExecutionState,
           activeEdgeIds: new Set<string>(),
+          leaderPath: [],
         })
       }),
 
@@ -215,6 +225,19 @@ export const useTaskExecutionStore = create<TaskExecutionStore>()(
     setActiveNode: (nodeId) =>
       set((state) => {
         state.activeNodeId = nodeId
+      }),
+
+    pushLeaderPathNode: (nodeId) =>
+      set((state) => {
+        state.leaderPath.push({ nodeId, edgeId: null })
+      }),
+
+    setLeaderPathEdge: (edgeId) =>
+      set((state) => {
+        const last = state.leaderPath[state.leaderPath.length - 1]
+        if (last) {
+          last.edgeId = edgeId
+        }
       }),
 
     setPendingPlan: (plan) =>
@@ -349,9 +372,39 @@ export const useSessionStore = create<SessionStore>()(
             state.viewingSessionId = null
           }
           if (!state.activeSessionId && !state.viewingSessionId && !execState.isRunning && !execState.isLearning) {
-            state.viewingSessionId = sessions.find((session) => session.status !== 'running')?.id ?? null
+            // 检测是否有正在运行的会话（刷新恢复场景）
+            const runningSession = sessions.find((session) => session.status === 'running')
+            if (runningSession) {
+              // 恢复为活跃会话，让 UI 切换到实时模式
+              state.activeSessionId = runningSession.id
+              state.viewingSessionId = null
+            } else {
+              state.viewingSessionId = sessions[0]?.id ?? null
+            }
           }
         })
+
+        // 在 set 之后恢复执行状态（不能在 immer 回调中调用外部 store）
+        if (!execState.isRunning && !execState.isLearning) {
+          const sessionState = get()
+          const runningSession = sessions.find((s) => s.id === sessionState.activeSessionId && s.status === 'running')
+          if (runningSession) {
+            const isLearn = runningSession.type === 'learn'
+            useTaskExecutionStore.getState().setCurrentTaskPrompt(runningSession.prompt)
+            // 恢复已有的 thinkingSteps 到 executionStore
+            for (const step of runningSession.thinkingSteps) {
+              useTaskExecutionStore.getState().addThinkingStep(step)
+            }
+            if (runningSession.agentOutput) {
+              useTaskExecutionStore.getState().appendAgentOutput(runningSession.agentOutput)
+            }
+            if (isLearn) {
+              useTaskExecutionStore.getState().setIsLearning(true)
+            } else {
+              useTaskExecutionStore.getState().setIsRunning(true)
+            }
+          }
+        }
       } catch (e) {
         console.error('加载会话历史失败:', e)
         set((state) => {
@@ -480,6 +533,7 @@ interface LegacyTaskStoreState {
   agentOutput: string
   activeEdgeIds: Set<string>
   activeNodeId: string | null
+  leaderPath: LeaderPathStep[]
   error: string | null
   pendingPlan: PlanReadyPayload | null
   pendingStep: StepConfirmPayload | null
@@ -504,6 +558,8 @@ interface LegacyTaskStoreActions {
   appendAgentOutput: (chunk: string) => void
   setActiveEdge: (edgeId: string | null) => void
   setActiveNode: (nodeId: string | null) => void
+  pushLeaderPathNode: (nodeId: string) => void
+  setLeaderPathEdge: (edgeId: string) => void
   setIsRunning: (running: boolean) => void
   setIsLearning: (learning: boolean) => void
   setError: (error: string | null) => void
@@ -606,6 +662,9 @@ const legacyStore = create<LegacyTaskStore>()(
     get activeNodeId() {
       return useTaskExecutionStore.getState().activeNodeId
     },
+    get leaderPath() {
+      return useTaskExecutionStore.getState().leaderPath
+    },
     get error() {
       return useTaskExecutionStore.getState().error
     },
@@ -652,6 +711,8 @@ const legacyStore = create<LegacyTaskStore>()(
     appendAgentOutput: (chunk) => useTaskExecutionStore.getState().appendAgentOutput(chunk),
     setActiveEdge: (edgeId) => useTaskExecutionStore.getState().setActiveEdge(edgeId),
     setActiveNode: (nodeId) => useTaskExecutionStore.getState().setActiveNode(nodeId),
+    pushLeaderPathNode: (nodeId) => useTaskExecutionStore.getState().pushLeaderPathNode(nodeId),
+    setLeaderPathEdge: (edgeId) => useTaskExecutionStore.getState().setLeaderPathEdge(edgeId),
     setIsRunning: (running) => useTaskExecutionStore.getState().setIsRunning(running),
     setIsLearning: (learning) => useTaskExecutionStore.getState().setIsLearning(learning),
     setError: (error) => useTaskExecutionStore.getState().setError(error),
@@ -811,6 +872,7 @@ const legacyGetState = (): LegacyTaskStore => {
     agentOutput: execState.agentOutput,
     activeEdgeIds: execState.activeEdgeIds,
     activeNodeId: execState.activeNodeId,
+    leaderPath: execState.leaderPath,
     error: execState.error,
     pendingPlan: execState.pendingPlan,
     pendingStep: execState.pendingStep,
@@ -830,6 +892,8 @@ const legacyGetState = (): LegacyTaskStore => {
     appendAgentOutput: execState.appendAgentOutput,
     setActiveEdge: execState.setActiveEdge,
     setActiveNode: execState.setActiveNode,
+    pushLeaderPathNode: execState.pushLeaderPathNode,
+    setLeaderPathEdge: execState.setLeaderPathEdge,
     setIsRunning: execState.setIsRunning,
     setIsLearning: execState.setIsLearning,
     setError: execState.setError,

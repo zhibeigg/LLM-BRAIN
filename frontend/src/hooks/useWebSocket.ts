@@ -27,6 +27,8 @@ export function useWebSocket() {
   const appendAgentOutput = useTaskStore((s) => s.appendAgentOutput)
   const setActiveEdge = useTaskStore((s) => s.setActiveEdge)
   const setActiveNode = useTaskStore((s) => s.setActiveNode)
+  const pushLeaderPathNode = useTaskStore((s) => s.pushLeaderPathNode)
+  const setLeaderPathEdge = useTaskStore((s) => s.setLeaderPathEdge)
   const setIsRunning = useTaskStore((s) => s.setIsRunning)
   const setIsLearning = useTaskStore((s) => s.setIsLearning)
   const setError = useTaskStore((s) => s.setError)
@@ -50,6 +52,7 @@ export function useWebSocket() {
         data: payload,
       })
       setActiveNode(payload.currentNodeId)
+      pushLeaderPathNode(payload.currentNodeId)
       schedulePersistCurrentSession('running')
     })
 
@@ -62,6 +65,9 @@ export function useWebSocket() {
         data: payload,
       })
       setActiveEdge(payload.chosenEdgeId)
+      if (payload.chosenEdgeId) {
+        setLeaderPathEdge(payload.chosenEdgeId)
+      }
       schedulePersistCurrentSession('running')
     })
 
@@ -184,5 +190,5 @@ export function useWebSocket() {
       unsubError()
       wsClient.disconnect()
     }
-  }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, persistCurrentSession, schedulePersistCurrentSession, fetchGraph, addNewNodeId])
+  }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, pushLeaderPathNode, setLeaderPathEdge, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, persistCurrentSession, schedulePersistCurrentSession, fetchGraph, addNewNodeId])
 }

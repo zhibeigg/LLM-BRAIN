@@ -300,6 +300,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         <Typography variant="caption" sx={{ color: c.textMuted }}>{desc}</Typography>
       </Box>
       <Switch checked={checked} size="small" onChange={(_, v) => onChange(v)}
+        inputProps={{ 'aria-label': title }}
         sx={{ '& .Mui-checked': { color: c.primary }, '& .Mui-checked + .MuiSwitch-track': { bgcolor: c.primary } }} />
     </Box>
   )
@@ -446,6 +447,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   (v) => settings.update('graphSnapToGrid', v))}
                 {switchRow('边动画', '连接线上显示流动动画效果', settings.graphAnimateEdges,
                   (v) => settings.update('graphAnimateEdges', v))}
+                {switchRow('Leader 自动聚焦', 'Leader 路径选择时自动平移缩放到当前节点', settings.graphAutoFocusLeader,
+                  (v) => settings.update('graphAutoFocusLeader', v))}
               </Box>
             )}
 

@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react'
 import { Box, Typography } from '@mui/material'
 import { useShallow } from 'zustand/shallow'
 import { useGraphStore } from '../../stores/graphStore'
-import { useTaskStore, type ThinkingStep } from '../../stores/taskStore'
+import { useTaskStore, useTaskExecutionStore, type ThinkingStep } from '../../stores/taskStore'
 import type {
   AgentStreamPayload,
   BossVerdictPayload,
@@ -117,6 +117,7 @@ function GraphSignalOverlayInner() {
     }))
   )
   const graphNodes = useGraphStore((state) => state.nodes)
+  const leaderPathLength = useTaskExecutionStore((s) => s.leaderPath.length)
 
   const signalEvents = useMemo(
     () => thinkingSteps.slice(-6).map(getStepSignal),
@@ -169,23 +170,26 @@ function GraphSignalOverlayInner() {
         <rect width="100" height="100" fill="url(#signalFieldCore)" className="graph-signal-field__wash" />
       </svg>
 
-      <Box className="graph-signal-status">
-        <Typography className="graph-signal-status__eyebrow">信号遥测</Typography>
-        <Typography className="graph-signal-status__title">{statusLabel}</Typography>
-        <Typography className="graph-signal-status__detail">{statusDetail}</Typography>
-        <Box className="graph-signal-status__metrics">
-          <span>{activeEdgeCount} 条活跃边</span>
-          <span>{streamChars} 个字符</span>
+      <Box className="graph-signal-stack">
+        <Box className="graph-signal-status">
+          <Typography className="graph-signal-status__eyebrow">信号遥测</Typography>
+          <Typography className="graph-signal-status__title">{statusLabel}</Typography>
+          <Typography className="graph-signal-status__detail">{statusDetail}</Typography>
+          <Box className="graph-signal-status__metrics">
+            <span>{activeEdgeCount} 条活跃边</span>
+            {leaderPathLength > 0 && <span>{leaderPathLength} 步路径</span>}
+            <span>{streamChars} 个字符</span>
+          </Box>
         </Box>
-      </Box>
 
-      {latestEvent && (
-        <Box className={`graph-signal-event graph-signal-event--${latestEvent.tone}`}>
-          <Typography className="graph-signal-event__time">{formatTime(latestEvent.timestamp)}</Typography>
-          <Typography className="graph-signal-event__label">{latestEvent.label}</Typography>
-          <Typography className="graph-signal-event__detail">{latestEvent.detail}</Typography>
-        </Box>
-      )}
+        {latestEvent && (
+          <Box className={`graph-signal-event graph-signal-event--${latestEvent.tone}`}>
+            <Typography className="graph-signal-event__time">{formatTime(latestEvent.timestamp)}</Typography>
+            <Typography className="graph-signal-event__label">{latestEvent.label}</Typography>
+            <Typography className="graph-signal-event__detail">{latestEvent.detail}</Typography>
+          </Box>
+        )}
+      </Box>
 
       <Box className="graph-signal-log" aria-label="最近的信息流事件">
         {signalEvents.slice(-4).map((event) => (

@@ -25,6 +25,7 @@ function MemoryNodeComponentInner(props: NodeProps) {
   const data = props.data as MemoryNodeData
   const selected = props.selected
   const active = (data as Record<string, unknown>).active === true
+  const inPath = (data as Record<string, unknown>).inPath === true
   const colors = nodeColors[data.type] ?? nodeColors.memory
 
   const newNodeIds = useGraphStore((s) => s.newNodeIds)
@@ -54,16 +55,19 @@ function MemoryNodeComponentInner(props: NodeProps) {
     ? NEW_NODE_COLOR
     : active
       ? colors.accent
-      : selected
-        ? colors.accent
-        : c.border
+      : inPath
+        ? c.primary
+        : selected
+          ? colors.accent
+          : c.border
 
   const bgColor = useMemo(() => {
     if (highlighted) return `${NEW_NODE_COLOR}18`
     if (active) return colors.bg
+    if (inPath) return `${c.primary}10`
     if (selected) return `${colors.accent}10`
     return c.bgCard
-  }, [highlighted, active, selected, colors, c.bgCard])
+  }, [highlighted, active, inPath, selected, colors, c.bgCard, c.primary])
 
   const handleStyle: React.CSSProperties = useMemo(() => ({
     width: 8,
@@ -75,11 +79,12 @@ function MemoryNodeComponentInner(props: NodeProps) {
   // 计算阴影
   const shadowIntensity = useMemo(() => {
     if (highlighted) return `0 0 0 2px ${c.success}`
-    if (active) return `0 0 0 2px ${colors.accent}`
+    if (active) return `0 0 0 2px ${colors.accent}, 0 0 12px ${colors.accent}40`
+    if (inPath) return `0 0 0 1.5px ${c.primary}80`
     if (selected) return `0 0 0 2px ${c.primary}`
-    if (isHovered) return `0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px ${colors.accent}`
-    return `0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px ${c.border}`
-  }, [highlighted, active, selected, isHovered, c, colors])
+    if (isHovered) return `0 2px 8px ${c.shadow}, 0 0 0 1px ${colors.accent}`
+    return `0 1px 3px ${c.shadow}, 0 0 0 1px ${c.border}`
+  }, [highlighted, active, inPath, selected, isHovered, c, colors])
 
   // 悬停时的Y轴偏移
   const hoverTransform = isHovered && !highlighted ? 'translateY(-3px)' : 'translateY(0)'
@@ -100,8 +105,21 @@ function MemoryNodeComponentInner(props: NodeProps) {
         transform: hoverTransform,
         transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         cursor: 'grab',
+        // 活跃节点脉冲动画
+        ...(active && {
+          animation: 'leader-node-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          '@keyframes leader-node-pulse': {
+            '0%, 100%': { boxShadow: `0 0 0 2px ${colors.accent}, 0 0 12px ${colors.accent}40` },
+            '50%': { boxShadow: `0 0 0 3px ${colors.accent}, 0 0 20px ${colors.accent}60` },
+          },
+        }),
+        // prefers-reduced-motion
+        '@media (prefers-reduced-motion: reduce)': {
+          animation: 'none !important',
+          transition: 'none !important',
+        },
         '&:hover': {
-          boxShadow: `0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px ${borderColor}`,
+          boxShadow: `0 2px 8px ${c.shadow}, 0 0 0 1px ${borderColor}`,
         },
       }}
     >
@@ -156,12 +174,12 @@ function MemoryNodeComponentInner(props: NodeProps) {
             width: 22,
             height: 22,
             bgcolor: c.error,
-            color: '#fff',
+            color: c.textInverse,
             zIndex: 10,
-            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.4)',
+            boxShadow: `0 2px 8px ${c.error}66`,
             '&:hover': { 
-              bgcolor: '#EF4444',
-              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.5)',
+              bgcolor: c.errorHover,
+              boxShadow: `0 4px 12px ${c.error}80`,
               transform: 'scale(1.1)',
             },
             transition: 'all 0.2s ease',
