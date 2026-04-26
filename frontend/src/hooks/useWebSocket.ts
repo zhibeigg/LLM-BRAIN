@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { wsClient } from '../services/websocket'
-import { useTaskStore } from '../stores/taskStore'
+import { useTaskStore, useTaskExecutionStore, useSessionStore } from '../stores/taskStore'
 import { useGraphStore } from '../stores/graphStore'
 import type {
   WSMessage,
@@ -43,7 +43,35 @@ export function useWebSocket() {
   useEffect(() => {
     wsClient.connect()
 
+    /**
+     * 刷新恢复：WS 重连后收到执行事件时，如果前端不在运行状态，
+     * 自动关联 running 会话并恢复 isRunning，让 UI 切换到实时模式。
+     */
+    const ensureRunning = () => {
+      const exec = useTaskExecutionStore.getState()
+      if (exec.isRunning || exec.isLearning) return
+      const sessionState = useSessionStore.getState()
+      const runningSession = sessionState.sessions.find((s) => s.status === 'running')
+      if (runningSession) {
+        // 关联会话
+        useSessionStore.setState({
+          activeSessionId: runningSession.id,
+          viewingSessionId: null,
+        })
+        exec.setCurrentTaskPrompt(runningSession.prompt)
+        if (runningSession.type === 'learn') {
+          exec.setIsLearning(true)
+        } else {
+          exec.setIsRunning(true)
+        }
+      } else {
+        // 没有 running 会话但收到了事件，直接标记为运行中
+        exec.setIsRunning(true)
+      }
+    }
+
     const unsubLeaderStep = wsClient.on('leader_step', (msg: WSMessage) => {
+      ensureRunning()
       const payload = msg.payload as LeaderStepPayload
       addThinkingStep({
         id: nextId(),
@@ -72,6 +100,7 @@ export function useWebSocket() {
     })
 
     const unsubAgentStream = wsClient.on('agent_stream', (msg: WSMessage) => {
+      ensureRunning()
       const payload = msg.payload as AgentStreamPayload
       appendAgentOutput(payload.chunk)
       // 合并连续的 agent_stream 到同一个步骤中

@@ -372,39 +372,10 @@ export const useSessionStore = create<SessionStore>()(
             state.viewingSessionId = null
           }
           if (!state.activeSessionId && !state.viewingSessionId && !execState.isRunning && !execState.isLearning) {
-            // 检测是否有正在运行的会话（刷新恢复场景）
-            const runningSession = sessions.find((session) => session.status === 'running')
-            if (runningSession) {
-              // 恢复为活跃会话，让 UI 切换到实时模式
-              state.activeSessionId = runningSession.id
-              state.viewingSessionId = null
-            } else {
-              state.viewingSessionId = sessions[0]?.id ?? null
-            }
+            // 优先显示最新会话（无论状态）
+            state.viewingSessionId = sessions[0]?.id ?? null
           }
         })
-
-        // 在 set 之后恢复执行状态（不能在 immer 回调中调用外部 store）
-        if (!execState.isRunning && !execState.isLearning) {
-          const sessionState = get()
-          const runningSession = sessions.find((s) => s.id === sessionState.activeSessionId && s.status === 'running')
-          if (runningSession) {
-            const isLearn = runningSession.type === 'learn'
-            useTaskExecutionStore.getState().setCurrentTaskPrompt(runningSession.prompt)
-            // 恢复已有的 thinkingSteps 到 executionStore
-            for (const step of runningSession.thinkingSteps) {
-              useTaskExecutionStore.getState().addThinkingStep(step)
-            }
-            if (runningSession.agentOutput) {
-              useTaskExecutionStore.getState().appendAgentOutput(runningSession.agentOutput)
-            }
-            if (isLearn) {
-              useTaskExecutionStore.getState().setIsLearning(true)
-            } else {
-              useTaskExecutionStore.getState().setIsRunning(true)
-            }
-          }
-        }
       } catch (e) {
         console.error('加载会话历史失败:', e)
         set((state) => {
