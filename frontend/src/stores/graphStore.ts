@@ -32,7 +32,7 @@ interface GraphState {
   fetchGraph: () => Promise<void>
   selectNode: (id: string | null) => void
   selectEdge: (id: string | null) => void
-  addNode: (node: Omit<MemoryNode, 'id' | 'createdAt' | 'updatedAt'>) => Promise<MemoryNode>
+  addNode: (node: Omit<MemoryNode, 'id' | 'brainId' | 'createdAt' | 'updatedAt'>) => Promise<MemoryNode>
   updateNode: (id: string, updates: Partial<MemoryNode>) => Promise<void>
   deleteNode: (id: string) => Promise<void>
   addEdge: (edge: Omit<MemoryEdge, 'id' | 'createdAt' | 'usageCount' | 'perceivedDifficulty'>) => Promise<MemoryEdge>
@@ -206,8 +206,9 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
               case 'complete':
                 if (layoutNodes) {
+                  const typedLayoutNodes = layoutNodes as Array<{ id: string; x: number; y: number }>
                   // 更新节点位置
-                  const positionMap = new Map(layoutNodes.map(n => [n.id, n]))
+                  const positionMap = new Map(typedLayoutNodes.map((n) => [n.id, n]))
                   set((state) => ({
                     nodes: state.nodes.map(n => {
                       const pos = positionMap.get(n.id)
@@ -224,7 +225,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
                   const { useBrainStore } = await import('./brainStore')
                   const brainId = useBrainStore.getState().currentBrainId
                   if (brainId) {
-                    const updatedNodes = layoutNodes.map((n: { id: string; x: number; y: number }) => ({
+                    const updatedNodes = typedLayoutNodes.map((n) => ({
                       id: n.id,
                       positionX: n.x,
                       positionY: n.y,
@@ -253,11 +254,11 @@ export const useGraphStore = create<GraphState>((set, get) => ({
             nodes,
             edges,
             options: {
-              iterations: options?.iterations ?? 100,
-              repulsion: options?.repulsion ?? 5000,
-              attraction: options?.attraction ?? 0.1,
-              damping: options?.damping ?? 0.85,
-              hierarchical: options?.hierarchical ?? false,
+              iterations: options?.iterations ?? 120,
+              repulsion: options?.repulsion ?? 18000,
+              attraction: options?.attraction ?? 0.025,
+              damping: options?.damping ?? 0.72,
+              hierarchical: options?.hierarchical ?? true,
             },
           })
         })

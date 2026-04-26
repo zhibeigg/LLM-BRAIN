@@ -15,7 +15,8 @@ interface AnimatedEdgeData {
 
 /** 难度 0~1 映射到颜色：绿 → 橙 → 红 */
 function difficultyColor(d: number): string {
-  const clamped = Math.max(0, Math.min(1, d))
+  const safeDifficulty = Number.isFinite(d) ? d : 0.5
+  const clamped = Math.max(0, Math.min(1, safeDifficulty))
   if (clamped < 0.5) {
     const t = clamped / 0.5
     const r = Math.round(56 + (221 - 56) * t)
@@ -32,7 +33,8 @@ function difficultyColor(d: number): string {
 
 /** 难度 0~1 映射到线宽 1.5~4 */
 function difficultyWidth(d: number): number {
-  return 1.5 + Math.max(0, Math.min(1, d)) * 2.5
+  const safeDifficulty = Number.isFinite(d) ? d : 0.5
+  return 1.5 + Math.max(0, Math.min(1, safeDifficulty)) * 2.5
 }
 
 function AnimatedEdgeInner(props: EdgeProps) {
@@ -53,6 +55,10 @@ function AnimatedEdgeInner(props: EdgeProps) {
   const active = data.active ?? false
   const inPath = data.inPath ?? false
   const animate = data.animate !== false
+
+  if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) {
+    return null
+  }
 
   const [edgePath] = getBezierPath({
     sourceX,

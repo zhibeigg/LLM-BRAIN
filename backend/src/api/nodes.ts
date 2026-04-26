@@ -108,6 +108,55 @@ nodesRouter.get('/count', (req, res) => {
   }
 })
 
+// PUT /batch-update - 批量更新节点位置（用于前端 Worker 自动布局后的持久化）
+nodesRouter.put('/batch-update', (req, res) => {
+  try {
+    const { brainId, nodes } = req.body as {
+      brainId?: string
+      nodes?: Array<{ id?: string; positionX?: number; positionY?: number }>
+    }
+
+    if (!brainId) {
+      res.status(400).json({ error: 'brainId is required' })
+      return
+    }
+
+    if (!Array.isArray(nodes)) {
+      res.status(400).json({ error: 'nodes must be an array' })
+      return
+    }
+
+    const check = verifyBrainOwnership(brainId, req.userId ?? '')
+    if (!check.ok) { res.status(check.status!).json({ error: check.error }); return }
+
+    const updated = []
+    for (const item of nodes) {
+      if (!item.id || !Number.isFinite(item.positionX) || !Number.isFinite(item.positionY)) {
+        res.status(400).json({ error: 'each node requires id, finite positionX and finite positionY' })
+        return
+      }
+
+      const existing = getNodeById(item.id)
+      if (!existing) {
+        res.status(404).json({ error: `Node not found: ${item.id}` })
+        return
+      }
+
+      if (existing.brainId !== brainId) {
+        res.status(403).json({ error: `Node does not belong to brain: ${item.id}` })
+        return
+      }
+
+      const node = updateNode(item.id, { positionX: item.positionX, positionY: item.positionY })
+      if (node) updated.push(node)
+    }
+
+    res.json(updated)
+  } catch (e) {
+    res.status(500).json({ error: String(e) })
+  }
+})
+
 // GET /:id
 nodesRouter.get('/:id', (req, res) => {
   try {

@@ -6,6 +6,7 @@ interface BrainState {
   brains: Brain[]
   currentBrainId: string | null
   loading: boolean
+  initialized: boolean
 
   fetchBrains: () => Promise<void>
   createBrain: (name: string, description?: string, projectPath?: string, initProject?: boolean) => Promise<Brain>
@@ -17,6 +18,7 @@ export const useBrainStore = create<BrainState>((set, get) => ({
   brains: [],
   currentBrainId: null,
   loading: false,
+  initialized: false,
 
   fetchBrains: async () => {
     set({ loading: true })
@@ -26,6 +28,7 @@ export const useBrainStore = create<BrainState>((set, get) => ({
       set({
         brains,
         loading: false,
+        initialized: true,
         // 如果当前没有选中大脑，自动选第一个
         currentBrainId: current && brains.some(b => b.id === current)
           ? current
@@ -33,7 +36,7 @@ export const useBrainStore = create<BrainState>((set, get) => ({
       })
     } catch (e) {
       console.error('获取大脑列表失败:', e)
-      set({ loading: false })
+      set({ loading: false, initialized: true })
     }
   },
 
@@ -42,6 +45,7 @@ export const useBrainStore = create<BrainState>((set, get) => ({
     set((state) => ({
       brains: [brain, ...state.brains],
       currentBrainId: brain.id,
+      initialized: true,
     }))
     return brain
   },
@@ -55,6 +59,7 @@ export const useBrainStore = create<BrainState>((set, get) => ({
         currentBrainId: state.currentBrainId === id
           ? brains[0]?.id ?? null
           : state.currentBrainId,
+        initialized: true,
       }
     })
   },

@@ -206,6 +206,10 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     })
 
     const data = await res.json() as Record<string, unknown>
+    // 调试：打印完整响应（仅当有工具时）
+    if ((body.tools as unknown[])?.length > 0) {
+      console.log(`[OpenAI-Responses] FULL RESPONSE:`, JSON.stringify(data).slice(0, 2000))
+    }
     const result = this.parseResponsesResult(data)
 
     if (!result.content && !result.tool_calls) {

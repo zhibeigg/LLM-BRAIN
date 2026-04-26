@@ -155,6 +155,22 @@ function NoBrainGuide({ onOpenCreate }: { onOpenCreate: () => void }) {
   )
 }
 
+function BrainLoadingGuide() {
+  const c = useColors()
+  return (
+    <Box sx={{
+      flex: 1, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 1.5,
+      bgcolor: c.bg,
+    }}>
+      <CircularProgress size={28} sx={{ color: c.primary }} />
+      <Typography sx={{ fontSize: 13, color: c.textMuted }}>
+        正在加载大脑信息...
+      </Typography>
+    </Box>
+  )
+}
+
 type MobileTab = 'chat' | 'graph' | 'personality'
 
 function MainApp() {
@@ -168,6 +184,8 @@ function MainApp() {
   const loadSessions = useTaskStore((s) => s.loadSessions)
   const currentBrainId = useBrainStore((s) => s.currentBrainId)
   const brainsLoading = useBrainStore((s) => s.loading)
+  const brainsInitialized = useBrainStore((s) => s.initialized)
+  const fetchBrains = useBrainStore((s) => s.fetchBrains)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createCount, setCreateCount] = useState(0)
 
@@ -177,6 +195,15 @@ function MainApp() {
 
   const [leftWidth, setLeftWidth] = useState(LEFT_WIDTH)
   const [graphWidth, setGraphWidth] = useState(480)
+  const brainBootstrapRequested = useRef(false)
+  const brainBootstrapLoading = !brainsInitialized || (brainsLoading && !currentBrainId)
+  const showNoBrainGuide = brainsInitialized && !currentBrainId && !brainsLoading
+
+  useEffect(() => {
+    if (brainBootstrapRequested.current) return
+    brainBootstrapRequested.current = true
+    fetchBrains()
+  }, [fetchBrains])
 
   // 登录后或切换大脑时加载历史会话
   useEffect(() => {
@@ -278,7 +305,9 @@ function MainApp() {
         {/* 移动端内容区 */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* 无大脑时显示引导页 */}
-          {!currentBrainId && !brainsLoading ? (
+          {brainBootstrapLoading ? (
+            <BrainLoadingGuide />
+          ) : showNoBrainGuide ? (
             <NoBrainGuide onOpenCreate={() => setCreateCount(c => c + 1)} />
           ) : (
             <>
@@ -410,7 +439,9 @@ function MainApp() {
 
         {/* 主内容区：两栏 */}
         <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          {!currentBrainId && !brainsLoading ? (
+          {brainBootstrapLoading ? (
+            <BrainLoadingGuide />
+          ) : showNoBrainGuide ? (
             <NoBrainGuide onOpenCreate={() => setCreateCount(c => c + 1)} />
           ) : (
             <>
@@ -553,7 +584,9 @@ function MainApp() {
         <DragHandle onDrag={handleLeftDrag} />
 
         {/* 无大脑时显示引导页 */}
-        {!currentBrainId && !brainsLoading ? (
+        {brainBootstrapLoading ? (
+          <BrainLoadingGuide />
+        ) : showNoBrainGuide ? (
           <NoBrainGuide onOpenCreate={() => setCreateCount(c => c + 1)} />
         ) : (
           <>

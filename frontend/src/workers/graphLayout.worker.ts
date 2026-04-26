@@ -43,14 +43,14 @@ export interface LayoutOptions {
 
 /** 默认配置 */
 const DEFAULT_OPTIONS: Required<LayoutOptions> = {
-  iterations: 100,
-  repulsion: 5000,
-  attraction: 0.1,
-  damping: 0.85,
-  maxMove: 50,
-  initialRadius: 300,
-  hierarchical: false,
-  levelGap: 150,
+  iterations: 120,
+  repulsion: 18000,
+  attraction: 0.025,
+  damping: 0.72,
+  maxMove: 28,
+  initialRadius: 420,
+  hierarchical: true,
+  levelGap: 340,
 }
 
 /** 节点布局状态 */
@@ -63,6 +63,19 @@ interface LayoutNode {
   width: number
   height: number
   level?: number
+}
+
+const NODE_WIDTH = 220
+const NODE_HEIGHT = 112
+const LAYER_GAP_X = 360
+const NODE_GAP_Y = 190
+const COMPONENT_GAP_Y = 260
+const ORIGIN_X = 80
+const ORIGIN_Y = 80
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num : fallback
 }
 
 /** 力导向布局算法核心类 */
@@ -113,7 +126,7 @@ class ForceDirectedLayout {
    */
   private initializeHierarchicalPositions(centerX: number, centerY: number, radius: number): void {
     // 计算节点的层级（使用BFS从根节点开始）
-    const levels = this.calculateNodeLevels()
+    this.calculateNodeLevels()
     
     // 按层级分组
     const levelGroups = new Map<number, LayoutNode[]>()
@@ -279,6 +292,142 @@ class ForceDirectedLayout {
   }
 
   /**
+   * 计算稳定的分层布局。
+   * 自动整理不使用纯力导向作为最终结果，避免节点被边吸引到一起造成重叠。
+   */
+  private computeStableHierarchicalLayout(): Array<{ id: string; x: number; y: number }> {
+    const ids = this.nodes.map((node) => node.id)
+    const idSet = new Set(ids)
+    const nodeById = new Map(this.nodes.map((node) => [node.id, node]))
+    const outgoing = new Map<string, string[]>()
+    const incoming = new Map<string, string[]>()
+    const undirected = new Map<string, string[]>()
+
+    for (const id of ids) {
+      outgoing.set(id, [])
+      incoming.set(id, [])
+      undirected.set(id, [])
+    }
+
+    for (const edge of this.edges) {
+      if (!idSet.has(edge.sourceId) || !idSet.has(edge.targetId)) continue
+      outgoing.get(edge.sourceId)?.push(edge.targetId)
+      incoming.get(edge.targetId)?.push(edge.sourceId)
+      undirected.get(edge.sourceId)?.push(edge.targetId)
+      undirected.get(edge.targetId)?.push(edge.sourceId)
+    }
+
+    const components: string[][] = []
+    const visited = new Set<string>()
+    for (const id of ids) {
+      if (visited.has(id)) continue
+      const component: string[] = []
+      const queue = [id]
+      visited.add(id)
+
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        component.push(current)
+        for (const next of undirected.get(current) ?? []) {
+          if (visited.has(next)) continue
+          visited.add(next)
+          queue.push(next)
+        }
+      }
+
+      components.push(component)
+    }
+
+    components.sort((a, b) => b.length - a.length)
+
+    const positions: Array<{ id: string; x: number; y: number }> = []
+    let componentTop = ORIGIN_Y
+
+    for (const component of components) {
+      const componentSet = new Set(component)
+      const roots = component.filter((id) => (incoming.get(id) ?? []).filter((p) => componentSet.has(p)).length === 0)
+      if (roots.length === 0) {
+        roots.push(
+          [...component].sort((a, b) => {
+            const degreeA = (incoming.get(a)?.length ?? 0) + (outgoing.get(a)?.length ?? 0)
+            const degreeB = (incoming.get(b)?.length ?? 0) + (outgoing.get(b)?.length ?? 0)
+            return degreeB - degreeA
+          })[0]
+        )
+      }
+
+      const layer = new Map<string, number>()
+      const queue = roots.map((id) => ({ id, depth: 0 }))
+      for (const root of roots) layer.set(root, 0)
+
+      while (queue.length > 0) {
+        const { id, depth } = queue.shift()!
+        for (const target of outgoing.get(id) ?? []) {
+          if (!componentSet.has(target)) continue
+          const nextDepth = depth + 1
+          if (nextDepth > (layer.get(target) ?? -1)) {
+            layer.set(target, nextDepth)
+            queue.push({ id: target, depth: nextDepth })
+          }
+        }
+      }
+
+      for (const id of component) {
+        if (!layer.has(id)) layer.set(id, 0)
+      }
+
+      const layers = new Map<number, string[]>()
+      for (const id of component) {
+        const depth = layer.get(id) ?? 0
+        if (!layers.has(depth)) layers.set(depth, [])
+        layers.get(depth)?.push(id)
+      }
+
+      const sortedLayerNumbers = [...layers.keys()].sort((a, b) => a - b)
+      let componentHeight = 0
+      for (const layerNumber of sortedLayerNumbers) {
+        const layerIds = layers.get(layerNumber) ?? []
+        layerIds.sort((a, b) => {
+          const aParents = (incoming.get(a) ?? []).filter((p) => componentSet.has(p))
+          const bParents = (incoming.get(b) ?? []).filter((p) => componentSet.has(p))
+          const aParentOrder = aParents.length > 0
+            ? aParents.reduce((sum, p) => sum + (layer.get(p) ?? 0), 0) / aParents.length
+            : 0
+          const bParentOrder = bParents.length > 0
+            ? bParents.reduce((sum, p) => sum + (layer.get(p) ?? 0), 0) / bParents.length
+            : 0
+          if (aParentOrder !== bParentOrder) return aParentOrder - bParentOrder
+          return a.localeCompare(b)
+        })
+        componentHeight = Math.max(componentHeight, Math.max(NODE_HEIGHT, (layerIds.length - 1) * NODE_GAP_Y + NODE_HEIGHT))
+      }
+
+      for (const layerNumber of sortedLayerNumbers) {
+        const layerIds = layers.get(layerNumber) ?? []
+        const layerHeight = (layerIds.length - 1) * NODE_GAP_Y
+        const startY = componentTop + Math.max(0, (componentHeight - layerHeight) / 2)
+
+        layerIds.forEach((id, index) => {
+          positions.push({
+            id,
+            x: ORIGIN_X + layerNumber * LAYER_GAP_X,
+            y: startY + index * NODE_GAP_Y,
+          })
+        })
+      }
+
+      for (const node of component) {
+        const layoutNode = nodeById.get(node)
+        if (layoutNode) layoutNode.level = layer.get(node) ?? 0
+      }
+
+      componentTop += componentHeight + COMPONENT_GAP_Y
+    }
+
+    return positions
+  }
+
+  /**
    * 启动布局计算
    */
   async run(
@@ -291,12 +440,12 @@ class ForceDirectedLayout {
     // 初始化节点数据
     this.nodes = nodes.map(n => ({
       id: n.id,
-      x: n.positionX,
-      y: n.positionY,
+      x: toFiniteNumber(n.positionX),
+      y: toFiniteNumber(n.positionY),
       vx: 0,
       vy: 0,
-      width: 180, // 默认节点宽度
-      height: 80, // 默认节点高度
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
     }))
     this.edges = edges
 
@@ -304,6 +453,10 @@ class ForceDirectedLayout {
     this.nodeMap.clear()
     for (const node of this.nodes) {
       this.nodeMap.set(node.id, node)
+    }
+
+    if (this.options.hierarchical) {
+      return this.computeStableHierarchicalLayout()
     }
 
     // 如果节点位置都是0，使用初始化位置

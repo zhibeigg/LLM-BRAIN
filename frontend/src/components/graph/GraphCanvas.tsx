@@ -49,6 +49,25 @@ const VIEWPORT_MARGIN = 0.5
 /** 边聚合阈值：低于此缩放级别时启用边聚合 */
 const EDGE_AGGRERATION_ZOOM_THRESHOLD = 0.4
 
+const DEFAULT_VIEW_BOUNDS = { left: -5000, top: -5000, right: 5000, bottom: 5000 }
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+function normalizeZoom(zoom: unknown): number {
+  const safeZoom = toFiniteNumber(zoom, 1)
+  return safeZoom > 0 ? safeZoom : 1
+}
+
+function getEdgeMarkerColor(markerEnd: Edge['markerEnd'], fallback: string): string {
+  if (typeof markerEnd === 'object' && markerEnd !== null && 'color' in markerEnd && typeof markerEnd.color === 'string') {
+    return markerEnd.color
+  }
+  return fallback
+}
+
 interface ContextMenuState {
   open: boolean
   position: { x: number; y: number }
@@ -74,8 +93,15 @@ function computeVisibleNodeIds(
   viewport: Viewport,
   containerBounds: { width: number; height: number }
 ): Set<string> {
-  const { x, y, zoom } = viewport
-  const { width, height } = containerBounds
+  const x = toFiniteNumber(viewport.x)
+  const y = toFiniteNumber(viewport.y)
+  const zoom = normalizeZoom(viewport.zoom)
+  const width = Math.max(0, toFiniteNumber(containerBounds.width))
+  const height = Math.max(0, toFiniteNumber(containerBounds.height))
+
+  if (width === 0 || height === 0) {
+    return new Set(nodes.map((node) => node.id))
+  }
 
   // 计算视窗边界（考虑边距扩展）
   const marginX = width * VIEWPORT_MARGIN
@@ -89,10 +115,10 @@ function computeVisibleNodeIds(
   const visibleIds = new Set<string>()
 
   for (const node of nodes) {
-    const nodeX = node.position.x
-    const nodeY = node.position.y
-    const nodeWidth = (node.measured?.width ?? node.width ?? 180) as number
-    const nodeHeight = (node.measured?.height ?? node.height ?? 80) as number
+    const nodeX = toFiniteNumber(node.position.x)
+    const nodeY = toFiniteNumber(node.position.y)
+    const nodeWidth = toFiniteNumber(node.measured?.width ?? node.width, 180)
+    const nodeHeight = toFiniteNumber(node.measured?.height ?? node.height, 80)
 
     // 检查节点是否在视窗边界内
     if (
@@ -117,10 +143,10 @@ function edgeIntersectsViewport(
   targetNode: Node,
   viewBounds: { left: number; top: number; right: number; bottom: number }
 ): boolean {
-  const sx = sourceNode.position.x + ((sourceNode.measured?.width ?? sourceNode.width ?? 180) as number) / 2
-  const sy = sourceNode.position.y + ((sourceNode.measured?.height ?? sourceNode.height ?? 80) as number) / 2
-  const tx = targetNode.position.x + ((targetNode.measured?.width ?? targetNode.width ?? 180) as number) / 2
-  const ty = targetNode.position.y + ((targetNode.measured?.height ?? targetNode.height ?? 80) as number) / 2
+  const sx = toFiniteNumber(sourceNode.position.x) + toFiniteNumber(sourceNode.measured?.width ?? sourceNode.width, 180) / 2
+  const sy = toFiniteNumber(sourceNode.position.y) + toFiniteNumber(sourceNode.measured?.height ?? sourceNode.height, 80) / 2
+  const tx = toFiniteNumber(targetNode.position.x) + toFiniteNumber(targetNode.measured?.width ?? targetNode.width, 180) / 2
+  const ty = toFiniteNumber(targetNode.position.y) + toFiniteNumber(targetNode.measured?.height ?? targetNode.height, 80) / 2
 
   const { left, top, right, bottom } = viewBounds
 
@@ -179,15 +205,18 @@ function aggregateEdges(
   edges: Edge[],
   nodes: Node[],
   zoom: number,
-  viewBounds: { left: number; top: number; right: number; bottom: number }
+  viewBounds: { left: number; top: number; right: number; bottom: number },
+  fallbackEdgeColor: string
 ): Edge[] {
+  const safeZoom = normalizeZoom(zoom)
+
   // 高缩放级别时显示所有边
-  if (zoom >= EDGE_AGGRERATION_ZOOM_THRESHOLD) {
+  if (safeZoom >= EDGE_AGGRERATION_ZOOM_THRESHOLD) {
     return edges
   }
 
   // 低于阈值时进行边聚合
-  const aggregationZoomFactor = 1 - (EDGE_AGGRERATION_ZOOM_THRESHOLD - zoom) / EDGE_AGGRERATION_ZOOM_THRESHOLD
+  const aggregationZoomFactor = 1 - (EDGE_AGGRERATION_ZOOM_THRESHOLD - safeZoom) / EDGE_AGGRERATION_ZOOM_THRESHOLD
 
   // 构建节点查找表
   const nodeMap = new Map<string, Node>()
@@ -220,7 +249,7 @@ function aggregateEdges(
       // 如果有多条并行边，创建一个聚合边（至少3条边才聚合）
       if (parallelEdges.length >= 3) {
         const avgDifficulty = parallelEdges.reduce((sum, e) => {
-          const difficulty = e.data?.baseDifficulty ?? 0.5
+          const difficulty = toFiniteNumber(e.data?.baseDifficulty, 0.5)
           return sum + difficulty
         }, 0) / parallelEdges.length
 
@@ -236,9 +265,9 @@ function aggregateEdges(
             aggregated: true,
             aggregatedCount: parallelEdges.length,
           },
-          markerEnd: { type: MarkerType.ArrowClosed, color: edge.markerEnd?.color ?? c.textMuted },
+          markerEnd: { type: MarkerType.ArrowClosed, color: getEdgeMarkerColor(edge.markerEnd, fallbackEdgeColor) },
           label: `${parallelEdges.length} 条边`,
-          labelStyle: { fontSize: 10, fill: c.textMuted },
+          labelStyle: { fontSize: 10, fill: fallbackEdgeColor },
           style: { strokeDasharray: '5,5' },
         })
       } else {
@@ -274,8 +303,16 @@ function useViewportNodes(
 
   // 计算视窗边界（世界坐标，带边距）
   const viewBounds = useMemo(() => {
-    const { x, y, zoom } = viewport
-    const { width, height } = containerBounds
+    const x = toFiniteNumber(viewport.x)
+    const y = toFiniteNumber(viewport.y)
+    const zoom = normalizeZoom(viewport.zoom)
+    const width = Math.max(0, toFiniteNumber(containerBounds.width))
+    const height = Math.max(0, toFiniteNumber(containerBounds.height))
+
+    if (width === 0 || height === 0) {
+      return DEFAULT_VIEW_BOUNDS
+    }
+
     const marginX = width * VIEWPORT_MARGIN
     const marginY = height * VIEWPORT_MARGIN
     return {
@@ -316,16 +353,17 @@ function useAggregatedEdges(
   edges: Edge[],
   nodes: Node[],
   viewBounds: { left: number; top: number; right: number; bottom: number },
-  zoom: number
+  zoom: number,
+  fallbackEdgeColor: string
 ) {
   const aggregatedEdges = useMemo(
-    () => aggregateEdges(edges, nodes, zoom, viewBounds),
-    [edges, nodes, zoom, viewBounds]
+    () => aggregateEdges(edges, nodes, zoom, viewBounds, fallbackEdgeColor),
+    [edges, nodes, zoom, viewBounds, fallbackEdgeColor]
   )
 
   return {
     aggregatedEdges,
-    isAggregated: zoom < EDGE_AGGRERATION_ZOOM_THRESHOLD,
+    isAggregated: normalizeZoom(zoom) < EDGE_AGGRERATION_ZOOM_THRESHOLD,
   }
 }
 
@@ -543,7 +581,10 @@ function GraphCanvasInner() {
 
   // 容器尺寸引用，用于视窗计算
   const containerRef = useRef<HTMLDivElement>(null)
-  const [containerBounds, setContainerBounds] = useState({ width: 800, height: 600 })
+  const [containerBounds, setContainerBounds] = useState({ width: 0, height: 0 })
+
+  // 容器是否已有实际尺寸（防止 ReactFlow Background 在尺寸为 0 时渲染出 NaN）
+  const containerReady = containerBounds.width > 0 && containerBounds.height > 0
 
   useEffect(() => {
     if (currentBrainId) {
@@ -556,13 +597,20 @@ function GraphCanvasInner() {
     const updateBounds = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect()
-        setContainerBounds({ width: rect.width, height: rect.height })
+        if (rect.width > 0 && rect.height > 0) {
+          setContainerBounds({ width: rect.width, height: rect.height })
+        }
       }
     }
 
     updateBounds()
+    // 如果首次未获取到尺寸，用 rAF 重试一次（lazy load 场景）
+    const rafId = requestAnimationFrame(updateBounds)
     window.addEventListener('resize', updateBounds)
-    return () => window.removeEventListener('resize', updateBounds)
+    return () => {
+      cancelAnimationFrame(rafId)
+      window.removeEventListener('resize', updateBounds)
+    }
   }, [])
 
   // 计算 Leader 路径中的节点和边 ID 集合
@@ -587,7 +635,10 @@ function GraphCanvasInner() {
       storeNodes.map((node) => ({
         id: node.id,
         type: 'memoryNode' as const,
-        position: { x: node.positionX, y: node.positionY },
+        position: {
+          x: toFiniteNumber(node.positionX),
+          y: toFiniteNumber(node.positionY),
+        },
         data: { ...node, active: node.id === activeNodeId, inPath: pathNodeIds.has(node.id) },
         selected: node.id === selectedNodeId,
       })),
@@ -633,7 +684,8 @@ function GraphCanvasInner() {
     rfEdges,
     rfNodes,
     viewBounds,
-    viewport.zoom
+    viewport.zoom,
+    c.textMuted
   )
 
   // 补充边引用的视窗外节点，确保跨视窗的边能正常渲染
@@ -662,7 +714,13 @@ function GraphCanvasInner() {
     (changes) => {
       onNodesChange(changes)
       for (const change of changes) {
-        if (change.type === 'position' && change.position && !change.dragging) {
+        if (
+          change.type === 'position' &&
+          change.position &&
+          !change.dragging &&
+          Number.isFinite(change.position.x) &&
+          Number.isFinite(change.position.y)
+        ) {
           updateNodePosition(change.id, change.position.x, change.position.y)
         }
       }
@@ -752,8 +810,8 @@ function GraphCanvasInner() {
         content: '',
         tags: [],
         confidence: 0.5,
-        positionX: position.x,
-        positionY: position.y,
+        positionX: toFiniteNumber(position.x),
+        positionY: toFiniteNumber(position.y),
       })
     },
     [addNode],
@@ -835,12 +893,14 @@ function GraphCanvasInner() {
           [5000, 5000],
         ]}
       >
-        <Background
-          color={graphSnapToGrid ? c.borderLight : c.border}
-          gap={graphSnapToGrid ? 20 : 24}
-          size={graphSnapToGrid ? 1 : 1}
-          variant={graphSnapToGrid ? BackgroundVariant.Lines : BackgroundVariant.Dots}
-        />
+        {containerReady && (
+          <Background
+            color={graphSnapToGrid ? c.borderLight : c.border}
+            gap={graphSnapToGrid ? 20 : 24}
+            size={graphSnapToGrid ? 1 : 1}
+            variant={graphSnapToGrid ? BackgroundVariant.Lines : BackgroundVariant.Dots}
+          />
+        )}
         {/* Leader 路径动画全局 keyframes（只注入一次） */}
         <svg width="0" height="0" style={{ position: 'absolute' }}>
           <defs>

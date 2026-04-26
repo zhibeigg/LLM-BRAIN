@@ -411,8 +411,8 @@ export function createAppTheme(mode: ColorMode, fontFamily?: string): Theme {
           },
           html: {
             fontSize: 16,
-            '-webkit-font-smoothing': 'antialiased',
-            '-moz-osx-font-smoothing': 'grayscale',
+            WebkitFontSmoothing: 'antialiased',
+            MozOsxFontSmoothing: 'grayscale',
             textRendering: 'optimizeLegibility',
           },
           body: {

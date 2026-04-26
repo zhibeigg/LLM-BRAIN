@@ -8,6 +8,91 @@ import type { AgentStreamPayload, ToolCallPayload } from '../../types/index.js'
 
 const MAX_TOOL_ROUNDS = 10
 
+interface InlineToolCallParseResult {
+  content: string
+  toolCalls: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+}
+
+function decodeXmlEntity(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+function coerceInlineValue(value: string): unknown {
+  const decoded = decodeXmlEntity(value)
+  if (decoded === 'true') return true
+  if (decoded === 'false') return false
+  if (/^-?\d+(?:\.\d+)?$/.test(decoded)) return Number(decoded)
+  return decoded
+}
+
+function normalizeInlineToolArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...args }
+
+  if ('file_path' in normalized && !('path' in normalized)) {
+    normalized.path = normalized.file_path
+    delete normalized.file_path
+  }
+
+  if (toolName === 'file_list' && 'max_depth' in normalized && !('depth' in normalized)) {
+    normalized.depth = normalized.max_depth
+    delete normalized.max_depth
+  }
+
+  if (toolName === 'file_list' && 'maxDepth' in normalized && !('depth' in normalized)) {
+    normalized.depth = normalized.maxDepth
+    delete normalized.maxDepth
+  }
+
+  // file_list 没有 recursive 参数；模型用 XML 风格工具标签时常会带上，忽略即可。
+  if (toolName === 'file_list') {
+    delete normalized.recursive
+  }
+
+  return normalized
+}
+
+function parseInlineToolCalls(content: string, tools: OpenAIToolDef[], round: number): InlineToolCallParseResult {
+  const toolNames = new Set(tools.map((tool) => tool.function.name))
+  const toolCalls: InlineToolCallParseResult['toolCalls'] = []
+  let cleaned = content
+  const tagPattern = /<([a-zA-Z_][\w-]*)\b([^<>]*?)\/>/g
+
+  cleaned = cleaned.replace(tagPattern, (fullMatch, rawName: string, rawAttrs: string) => {
+    if (!toolNames.has(rawName)) return fullMatch
+
+    const args: Record<string, unknown> = {}
+    const attrPattern = /([a-zA-Z_][\w-]*)\s*=\s*("([^"]*)"|'([^']*)')/g
+    let attrMatch: RegExpExecArray | null
+    while ((attrMatch = attrPattern.exec(rawAttrs)) !== null) {
+      const key = attrMatch[1]
+      const value = attrMatch[3] ?? attrMatch[4] ?? ''
+      args[key] = coerceInlineValue(value)
+    }
+
+    toolCalls.push({
+      id: `inline-${Date.now()}-${round}-${toolCalls.length}`,
+      type: 'function',
+      function: {
+        name: rawName,
+        arguments: JSON.stringify(normalizeInlineToolArgs(rawName, args)),
+      },
+    })
+
+    return ''
+  })
+
+  return { content: cleaned.trim(), toolCalls }
+}
+
 export class AgentRole extends LLMRoleBase {
   readonly role: LLMRole = 'agent'
   readonly systemPrompt: string
@@ -39,6 +124,7 @@ export class AgentRole extends LLMRoleBase {
 4. terminal 可以执行任意 shell 命令，适合编译、测试、git 操作等
 5. 不要编造搜索结果或计算结果，必须通过工具获取真实数据
 6. 每次操作后验证结果，确保修改正确
+7. 必须使用平台提供的结构化工具调用，不要把 <file_list .../>、<terminal .../> 这类 XML/HTML 标签当作正文输出。
 
 关键：当用户给你一个涉及代码或文件的任务时，你必须主动调用工具去执行，而不是只给出文字建议或代码片段。你有完整的文件系统访问权限，请直接操作。`
   }
@@ -66,15 +152,34 @@ export class AgentRole extends LLMRoleBase {
       const result = await this.chatWithMessages(messages, tools)
       console.log(`[Agent] round ${round}: content=${result.content?.length ?? 0} chars, tool_calls=${result.tool_calls?.length ?? 0}`)
 
-      // 如果没有 tool_calls，说明进入最终回答阶段；改用流式请求重新生成最终回答
+      // 部分 OpenAI 兼容模型不会返回标准 tool_calls，而是把工具调用写成
+      // <file_list path="." /> / <terminal command="..." /> 这类文本。
+      // 将其兜底转换成真实 tool_call，避免前端只看到原始标签且工具没有执行。
+      if ((!result.tool_calls || result.tool_calls.length === 0) && result.content) {
+        const parsedInline = parseInlineToolCalls(result.content, tools, round)
+        if (parsedInline.toolCalls.length > 0) {
+          result.content = parsedInline.content
+          result.tool_calls = parsedInline.toolCalls
+          console.log(`[Agent] round ${round}: parsed ${parsedInline.toolCalls.length} inline XML-style tool calls`)
+        }
+      }
+
+      // 如果没有 tool_calls，说明进入最终回答阶段。
+      // 不要再发起一次不带 tools 的流式重试，否则部分模型会把工具调用写成正文 XML 标签。
       if (!result.tool_calls || result.tool_calls.length === 0) {
-        console.log(`[Agent] round ${round}: no tool_calls, streaming final answer`)
+        console.log(`[Agent] round ${round}: no tool_calls, using final content`)
+        if (result.content) {
+          broadcast('agent_stream', { chunk: result.content, done: false } satisfies AgentStreamPayload)
+          broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
+          return result.content
+        }
+
         let content = ''
         for await (const chunk of this.chatStreamWithMessages(messages)) {
           content += chunk.content
           broadcast('agent_stream', { chunk: chunk.content, done: chunk.done } satisfies AgentStreamPayload)
         }
-        return content || result.content
+        return content
       }
 
       // 有 tool_calls 且有中间思考内容时，推送给前端

@@ -16,6 +16,13 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
     return null
   }
 
+  // 开发环境下 VitePWA 不会生成 /sw.js，直接注册会拿到 index.html，
+  // 浏览器因此报 unsupported MIME type ('text/html')。
+  if (import.meta.env.DEV) {
+    console.log('[PWA] 开发环境跳过 Service Worker 注册')
+    return null
+  }
+
   try {
     const registration = await navigator.serviceWorker.register('/sw.js', {
       scope: '/',
@@ -93,8 +100,8 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 export function showLocalNotification(title: string, options?: NotificationOptions): void {
   if (Notification.permission === 'granted') {
     new Notification(title, {
-      icon: '/pwa-192x192.png',
-      badge: '/pwa-192x192.png',
+      icon: '/pwa-192x192.svg',
+      badge: '/pwa-192x192.svg',
       ...options,
     })
   }

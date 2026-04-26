@@ -92,7 +92,21 @@ class WebSocketClient {
     }
     const old = this.ws
     this.ws = null
-    old?.close()
+    if (!old || old.readyState === WebSocket.CLOSED || old.readyState === WebSocket.CLOSING) {
+      return
+    }
+
+    // React StrictMode 会在开发环境快速 mount/unmount effect。
+    // CONNECTING 状态下立即 close 会触发浏览器的
+    // "WebSocket is closed before the connection is established" 噪音。
+    if (old.readyState === WebSocket.CONNECTING) {
+      old.onopen = () => old.close()
+      old.onerror = null
+      old.onclose = null
+      return
+    }
+
+    old.close()
   }
 }
 

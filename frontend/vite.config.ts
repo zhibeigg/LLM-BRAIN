@@ -16,7 +16,7 @@ export default defineConfig({
     // PWA 支持
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'apple-touch-icon.png', 'robots.txt'],
+      includeAssets: ['favicon.png', 'pwa-192x192.svg', 'pwa-512x512.svg', 'robots.txt'],
       manifest: {
         name: 'LLM Brain - 智能知识库管理',
         short_name: 'LLMBrain',
@@ -30,16 +30,16 @@ export default defineConfig({
         categories: ['productivity', 'utilities'],
         icons: [
           {
-            src: 'pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any maskable',
+            src: 'pwa-192x192.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any',
           },
           {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable',
+            src: 'pwa-512x512.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any',
           },
         ],
         screenshots: [],
@@ -49,7 +49,7 @@ export default defineConfig({
             short_name: '新建',
             description: '创建新的对话会话',
             url: '/?action=new',
-            icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }],
+            icons: [{ src: 'pwa-192x192.svg', sizes: 'any', type: 'image/svg+xml' }],
           },
         ],
       },
@@ -140,16 +140,8 @@ export default defineConfig({
       },
       // 构建输出目录
       outDir: 'dist',
-      // 是否在每次构建时生成 PWA 文件
-      generateSW: true,
-      // PWA 更新策略
-      refreshRemediation: {
-        enabled: true,
-        retryStrategy: {
-          maxRetries: 3,
-          retryInterval: 1000,
-        },
-      },
+      // 使用 Workbox 生成 Service Worker
+      strategies: 'generateSW',
     }),
   ],
 
