@@ -19,6 +19,7 @@ import {
   Close as CloseIcon,
   Queue as QueueIcon,
   Build as BuildIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material'
 import { useQueueStore, useSessionStore, useTaskExecutionStore, useTaskStore } from '../../stores/taskStore'
 import { useGraphStore } from '../../stores/graphStore'
@@ -32,45 +33,55 @@ import type {
   ToolCallPayload,
   LLMTrace,
 } from '../../types'
-import { useColors, useThemeMode } from '../../ThemeContext'
+import { useColors } from '../../ThemeContext'
 import { MarkdownRenderer } from '../common/MarkdownRenderer'
 import { ToolCallCard } from './ToolCallCard'
 
 /* ── 步骤配置 ── */
 
-const STEP_CONFIG = {
-  leader_step: { icon: ThinkIcon, color: '#A78BFA', label: 'Leader 思考' },
-  leader_decision: { icon: RouteIcon, color: '#5B8DEF', label: 'Leader 决策' },
-  agent_stream: { icon: AgentIcon, color: '#4ADE80', label: 'Agent 输出' },
-  boss_verdict: { icon: BossIcon, color: '#FBBF24', label: 'Boss 评审' },
-  learning_progress: { icon: LearnIcon, color: '#C084FC', label: '知识学习' },
-  tool_call: { icon: BuildIcon, color: '#F59E0B', label: '工具调用' },
+const STEP_ICONS = {
+  leader_step: { icon: ThinkIcon, label: 'Leader 思考' },
+  leader_decision: { icon: RouteIcon, label: 'Leader 决策' },
+  agent_stream: { icon: AgentIcon, label: 'Agent 输出' },
+  boss_verdict: { icon: BossIcon, label: 'Boss 评审' },
+  learning_progress: { icon: LearnIcon, label: '知识学习' },
+  tool_call: { icon: BuildIcon, label: '工具调用' },
 } as const
+
+function useStepColors() {
+  const c = useColors()
+  return {
+    leader_step: c.stepLeader,
+    leader_decision: c.primary,
+    agent_stream: c.primary,
+    boss_verdict: c.stepBoss,
+    learning_progress: c.stepLearn,
+    tool_call: c.textMuted,
+  }
+}
 
 /** 步骤卡片内部颜色（跟随主题） */
 function useStepTheme() {
   const c = useColors()
-  const { mode } = useThemeMode()
-  const isDark = mode === 'dark'
   return {
     bodyText: c.text,
     mutedText: c.textSecondary,
     dimText: c.textMuted,
-    filteredText: isDark ? '#4B5059' : '#C7C7CC',
-    brightText: isDark ? '#D1D3DA' : '#1D1D1F',
-    agentText: c.success,
+    filteredText: c.textDim,
+    brightText: c.text,
+    agentText: c.text,
     chipBg: c.bg,
     chipBorder: c.border,
     filteredChipBg: c.bgPanel,
     cardBg: c.bg,
-    cardAgentBg: isDark ? '#0E0F10' : '#F5FFF5',
+    cardAgentBg: c.bg,
     cardHeaderBg: c.bgPanel,
-    cardHeaderAgentBg: isDark ? '#1A1C1A' : '#F0F5F0',
+    cardHeaderAgentBg: c.bgPanel,
     cardHeaderHover: c.bgHover,
-    cardHeaderAgentHover: isDark ? '#252825' : '#E5EDE5',
+    cardHeaderAgentHover: c.bgHover,
     historyBg: c.bg,
     historyHover: c.bgPanel,
-    progressBg: isDark ? '#3A3D41' : '#D1D1D6',
+    progressBg: c.border,
   }
 }
 
@@ -192,7 +203,7 @@ function FriendlyContent({ text, maxHeight }: { text: string; maxHeight?: number
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3 }}>
                 {(val as Array<Record<string, unknown>>).map((dim, i) => {
                   const v = typeof dim.value === 'number' ? dim.value as number : 0.5
-                  const barColor = v < 0.3 ? '#4ADE80' : v < 0.7 ? '#FBBF24' : '#A78BFA'
+                  const barColor = v < 0.3 ? c.diffEasy : v < 0.7 ? c.diffMedium : c.stepLeader
                   return (
                     <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                       <Typography sx={{ fontSize: 10, color: t.dimText, width: 52, flexShrink: 0 }}>{String(dim.name)}</Typography>
@@ -245,7 +256,7 @@ function FriendlyContent({ text, maxHeight }: { text: string; maxHeight?: number
         if (typeof val === 'boolean') {
           return (
             <TraceRow key={key} label={label}>
-              <Typography sx={{ fontSize: 11, color: val ? '#4ADE80' : '#EF4444', fontWeight: 600 }}>{val ? '是' : '否'}</Typography>
+              <Typography sx={{ fontSize: 11, color: val ? c.success : c.error, fontWeight: 600 }}>{val ? '是' : '否'}</Typography>
             </TraceRow>
           )
         }
@@ -281,6 +292,7 @@ function FriendlyContent({ text, maxHeight }: { text: string; maxHeight?: number
 
 function TraceDetail({ trace }: { trace?: LLMTrace }) {
   const t = useStepTheme()
+  const c = useColors()
   const [open, setOpen] = useState(false)
 
   if (!trace) return null
@@ -298,7 +310,7 @@ function TraceDetail({ trace }: { trace?: LLMTrace }) {
         sx={{
           display: 'flex', alignItems: 'center', gap: 0.5,
           cursor: 'pointer', userSelect: 'none',
-          '&:hover': { '& .trace-label': { color: '#F59E0B' } },
+          '&:hover': { '& .trace-label': { color: c.stepTool } },
         }}
       >
         <ExpandMoreIcon
@@ -434,8 +446,37 @@ function PathChoiceCard({
   const isDecided = !!decision
   const isStopped = isDecided && !chosenEdgeId
 
-  const accentColor = '#A78BFA'
-  const dotClass = isLast && isBusy ? 'step-dot step-dot--breathing' : 'step-dot'
+  // ── 流式揭示：分阶段展示卡片内容 ──
+  // phase 0: 刚挂载，只显示标题栏
+  // phase 1: 展示候选列表（延迟 ~150ms）
+  // phase 2: 展示决策结果（decision 到达后再延迟 ~300ms）
+  // 如果挂载时 decision 已存在（历史数据 / 回放），直接跳到 phase 2
+  const [phase, setPhase] = useState(() => isDecided ? 2 : 0)
+  const mountedRef = useRef(false)
+
+  useEffect(() => {
+    // 历史数据已经在 phase 2，跳过
+    if (mountedRef.current) return
+    mountedRef.current = true
+    if (isDecided) return // 挂载时已有 decision，无需动画
+    // phase 0 → 1：展示候选列表
+    const t1 = setTimeout(() => setPhase(1), 150)
+    return () => clearTimeout(t1)
+  }, [isDecided])
+
+  useEffect(() => {
+    if (phase < 1 || !isDecided || phase >= 2) return
+    // phase 1 → 2：decision 到达后延迟展示结果
+    const t2 = setTimeout(() => setPhase(2), 300)
+    return () => clearTimeout(t2)
+  }, [phase, isDecided])
+
+  // 真正的等待态：候选列表已展示(phase>=1)，但决策结果还没展示(phase<2)
+  const isAwaiting = phase >= 1 && phase < 2
+  // 决策结果是否已揭示
+  const showDecision = phase >= 2 && isDecided
+
+  const accentColor = c.textMuted
 
   // 从图谱中查找当前节点标题
   const currentNodeTitle = graphNodes.find(n => n.id === stepData.currentNodeId)?.title
@@ -449,49 +490,10 @@ function PathChoiceCard({
   return (
     <Box
       sx={{
-        position: 'relative',
-        pl: 3.5,
-        pb: 2,
+        pb: 1.5,
         background: 'transparent',
       }}
     >
-      {/* 时间线竖线 */}
-      <Box
-        sx={{
-          position: 'absolute',
-          left: 10,
-          top: 0,
-          bottom: 0,
-          width: '1.5px',
-          background: isLast
-            ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)`
-            : c.border,
-          opacity: 0.6,
-        }}
-      />
-
-      {/* 时间线圆点 */}
-      <Box
-        className={dotClass}
-        sx={{
-          position: 'absolute',
-          left: 4,
-          top: 12,
-          width: 14,
-          height: 14,
-          borderRadius: '50%',
-          zIndex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          '--dot-color': accentColor,
-          animationDelay: `${index * 0.06}s`,
-        }}
-      >
-        <Box sx={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1.5px solid ${accentColor}`, opacity: 0.5 }} />
-        <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: accentColor, boxShadow: `0 0 6px ${accentColor}60` }} />
-      </Box>
-
       {/* 卡片主体 */}
       <div
         className="step-card"
@@ -503,14 +505,6 @@ function PathChoiceCard({
           animationDelay: `${index * 0.06}s`,
         }}
       >
-        {/* 左侧色条 */}
-        <div
-          style={{
-            position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
-            background: `linear-gradient(to bottom, ${accentColor}, ${accentColor}40)`,
-            borderRadius: '10px 0 0 10px',
-          }}
-        />
 
         {/* 标题栏：步骤编号 + 当前节点 + 时间 */}
         <Box
@@ -520,10 +514,14 @@ function PathChoiceCard({
             background: t.cardHeaderBg,
           }}
         >
-          <RouteIcon sx={{ fontSize: 15, color: accentColor }} />
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: accentColor, letterSpacing: '0.02em' }}>
+          <RouteIcon sx={{ fontSize: 15, color: c.stepLeader }} />
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: t.bodyText, letterSpacing: '0.02em' }}>
             #{stepNumber}
           </Typography>
+          {/* 等待决策时在编号旁显示 spinner */}
+          {isAwaiting && (
+            <CircularProgress size={12} thickness={5} sx={{ color: accentColor }} />
+          )}
           <Typography sx={{ fontSize: 12, color: t.bodyText, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
             {currentNodeTitle}
           </Typography>
@@ -543,15 +541,16 @@ function PathChoiceCard({
           </Typography>
         </Box>
 
-        {/* 岔路列表 */}
+        {/* 岔路列表 —— phase >= 1 时展示 */}
+        <Collapse in={phase >= 1} timeout={250}>
         <Box sx={{ px: 2, py: 1.5 }}>
           {stepData.candidates.length === 0 && (
             <Typography sx={{ fontSize: 12, color: t.mutedText, fontStyle: 'italic' }}>
               无出边，自动停止
             </Typography>
           )}
-          {stepData.candidates.map((cd) => {
-            const isChosen = chosenEdgeId === cd.edgeId
+          {stepData.candidates.map((cd, cdIdx) => {
+            const isChosen = showDecision && chosenEdgeId === cd.edgeId
 
             return (
               <Box
@@ -564,16 +563,25 @@ function PathChoiceCard({
                   px: 1,
                   mb: 0.5,
                   borderRadius: '6px',
-                  border: `1px solid ${isChosen ? `${c.success}40` : 'transparent'}`,
-                  bgcolor: isChosen ? `${c.success}08` : 'transparent',
-                  transition: 'all 0.2s',
+                  border: `1px solid ${isChosen ? `${c.primary}40` : 'transparent'}`,
+                  bgcolor: isChosen ? `${c.primary}08` : 'transparent',
+                  transition: 'all 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+                  // 已揭示决策但未被选中的候选项降低透明度
+                  opacity: showDecision && !isChosen ? 0.5 : 1,
+                  // 候选项交错入场
+                  animation: 'stepSlideIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) backwards',
+                  animationDelay: `${cdIdx * 0.05}s`,
                 }}
               >
-                {/* 状态图标 */}
+                {/* 状态图标：等待态 → 脉冲点 | 选中 → 打勾弹入 | 停止 → stop | 未选中 → 灰点 */}
                 {isChosen ? (
-                  <ChosenIcon sx={{ fontSize: 15, color: c.success, flexShrink: 0 }} />
-                ) : isDecided ? (
+                  <ChosenIcon className="candidate-check-in" sx={{ fontSize: 15, color: c.primary, flexShrink: 0 }} />
+                ) : showDecision && isStopped ? (
+                  <StopIcon sx={{ fontSize: 14, color: t.dimText, flexShrink: 0 }} />
+                ) : showDecision ? (
                   <DotIcon sx={{ fontSize: 6, color: t.dimText, flexShrink: 0, mx: '4.5px' }} />
+                ) : isAwaiting ? (
+                  <DotIcon className="candidate-pulse" sx={{ fontSize: 8, color: accentColor, flexShrink: 0, mx: '3.5px' }} />
                 ) : (
                   <ChevronRightIcon sx={{ fontSize: 16, color: t.dimText, flexShrink: 0 }} />
                 )}
@@ -583,7 +591,7 @@ function PathChoiceCard({
                   sx={{
                     fontSize: 13,
                     fontWeight: isChosen ? 600 : 400,
-                    color: isChosen ? c.success : t.brightText,
+                    color: isChosen ? c.primary : t.brightText,
                     flex: 1,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -599,9 +607,9 @@ function PathChoiceCard({
                   size="small"
                   sx={{
                     height: 18, fontSize: 10, flexShrink: 0,
-                    bgcolor: isChosen ? `${c.success}15` : `${accentColor}15`,
-                    color: isChosen ? c.success : accentColor,
-                    border: `1px solid ${isChosen ? `${c.success}30` : `${accentColor}30`}`,
+                    bgcolor: isChosen ? `${c.primary}15` : `${accentColor}15`,
+                    color: isChosen ? c.primary : accentColor,
+                    border: `1px solid ${isChosen ? `${c.primary}30` : `${accentColor}30`}`,
                   }}
                 />
 
@@ -627,18 +635,37 @@ function PathChoiceCard({
             )
           })}
 
-          {/* 决策结果 */}
-          {isDecided && (
+          {/* 等待态：spinner + 文案 */}
+          {isAwaiting && stepData.candidates.length > 0 && (
             <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${t.chipBorder}` }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <CircularProgress size={13} thickness={5} sx={{ color: accentColor }} />
+                <Typography sx={{ fontSize: 12, color: t.mutedText }}>
+                  Leader 正在决策…
+                </Typography>
+              </Box>
+            </Box>
+          )}
+          {/* 决策结果揭示 */}
+          {showDecision && (
+            <Box sx={{
+              mt: 1, px: 1.5, py: 1, borderRadius: '6px',
+              bgcolor: isStopped ? `${c.warning}08` : `${c.primary}08`,
+              border: `1px solid ${isStopped ? `${c.warning}20` : `${c.primary}20`}`,
+              animation: 'stepSlideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both',
+            }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-                <RouteIcon sx={{ fontSize: 14, color: isStopped ? t.mutedText : '#5B8DEF' }} />
                 {isStopped ? (
-                  <Typography sx={{ fontSize: 12, fontWeight: 600, color: t.mutedText }}>
-                    停止遍历
-                  </Typography>
+                  <>
+                    <StopIcon sx={{ fontSize: 14, color: c.warning }} />
+                    <Typography sx={{ fontSize: 12, fontWeight: 600, color: c.warning }}>
+                      停止遍历
+                    </Typography>
+                  </>
                 ) : (
                   <>
-                    <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#5B8DEF' }}>
+                    <RouteIcon sx={{ fontSize: 14, color: c.primary }} />
+                    <Typography sx={{ fontSize: 12, fontWeight: 600, color: c.primary }}>
                       → {chosenTarget?.targetNodeTitle ?? '未知'}
                     </Typography>
                     <Typography sx={{ fontSize: 11, color: t.dimText }}>
@@ -646,12 +673,12 @@ function PathChoiceCard({
                     </Typography>
                   </>
                 )}
-                {decisionData?.reason && (
-                  <Typography sx={{ fontSize: 11, color: t.mutedText, fontStyle: 'italic' }}>
-                    — {decisionData.reason.length > 60 ? decisionData.reason.slice(0, 60) + '…' : decisionData.reason}
-                  </Typography>
-                )}
               </Box>
+              {decisionData?.reason && (
+                <Typography sx={{ fontSize: 11, color: t.mutedText, mt: 0.5 }}>
+                  {decisionData.reason.length > 80 ? decisionData.reason.slice(0, 80) + '…' : decisionData.reason}
+                </Typography>
+              )}
             </Box>
           )}
 
@@ -708,6 +735,7 @@ function PathChoiceCard({
           <TraceDetail trace={stepData.trace} />
           {decisionData?.trace && <TraceDetail trace={decisionData.trace} />}
         </Box>
+        </Collapse>
       </div>
     </Box>
   )
@@ -761,7 +789,7 @@ function StepContent({ step }: { step: ThinkingStep }) {
         analyzing: '分析中', generating: '生成中', creating_nodes: '创建节点',
         evaluating_edges: '评估连接', creating_edges: '创建连接', done: '完成', error: '错误',
       }
-      const phaseColor = data.phase === 'done' ? c.success : data.phase === 'error' ? c.error : '#C084FC'
+      const phaseColor = data.phase === 'done' ? c.success : data.phase === 'error' ? c.error : c.textMuted
       return (
         <>
           <Chip
@@ -784,11 +812,9 @@ function StepContent({ step }: { step: ThinkingStep }) {
                 sx={{
                   height: 4, borderRadius: 2,
                   bgcolor: t.progressBg,
-                  animation: 'progressGlow 2s ease-in-out infinite',
                   '& .MuiLinearProgress-bar': {
-                    bgcolor: '#C084FC',
+                    bgcolor: c.textMuted,
                     borderRadius: 2,
-                    boxShadow: '0 0 8px #C084FC60',
                   },
                 }}
               />
@@ -818,64 +844,29 @@ function StepCard({
 }) {
   const c = useColors()
   const t = useStepTheme()
+  const stepColors = useStepColors()
   const [expanded, setExpanded] = useState(true)
-  const config = STEP_CONFIG[step.type]
-  const Icon = config.icon
+  const icons = STEP_ICONS[step.type]
+  const Icon = icons.icon
 
-  const accentColor =
-    step.type === 'boss_verdict'
-      ? (step.data as BossVerdictPayload).passed ? c.success : c.error
-      : step.type === 'learning_progress'
-        ? (step.data as LearningProgressPayload).phase === 'error' ? c.error
-          : (step.data as LearningProgressPayload).phase === 'done' ? c.success
-          : config.color
-        : config.color
+  const accentColor = stepColors[step.type]
 
   const isVerdict = step.type === 'boss_verdict'
   const isAgent = step.type === 'agent_stream'
-  const cardClass = isVerdict ? 'step-card step-card--verdict' : 'step-card'
-  const dotClass = isLast && isBusy ? 'step-dot step-dot--breathing' : 'step-dot'
+  const cardClass = 'step-card'
 
   return (
-    <Box sx={{ position: 'relative', pl: 3.5, pb: 2, background: 'transparent' }}>
-      <Box
-        sx={{
-          position: 'absolute', left: 10, top: 0, bottom: 0, width: '1.5px',
-          background: isLast ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)` : c.border,
-          opacity: 0.6,
-        }}
-      />
-      <Box
-        className={dotClass}
-        sx={{
-          position: 'absolute', left: 4, top: 12, width: 14, height: 14,
-          borderRadius: '50%', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          '--dot-color': accentColor, animationDelay: `${index * 0.06}s`,
-        }}
-      >
-        <Box sx={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1.5px solid ${accentColor}`, opacity: 0.5 }} />
-        <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: accentColor, boxShadow: `0 0 6px ${accentColor}60` }} />
-      </Box>
-
+    <Box sx={{ pb: 1.5, background: 'transparent' }}>
       <div
         className={cardClass}
         style={{
           borderRadius: 10,
-          background: isAgent ? t.cardAgentBg : t.cardBg,
-          border: `1px solid ${isVerdict ? accentColor : t.chipBorder}`,
+          background: t.cardBg,
+          border: `1px solid ${t.chipBorder}`,
           overflow: 'hidden',
           animationDelay: `${index * 0.06}s`,
-          // @ts-expect-error CSS custom property
-          '--verdict-color': isVerdict ? accentColor : undefined,
         }}
       >
-        <div
-          style={{
-            position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
-            background: `linear-gradient(to bottom, ${accentColor}, ${accentColor}40)`,
-            borderRadius: '10px 0 0 10px',
-          }}
-        />
         <div
           role="button"
           tabIndex={0}
@@ -884,16 +875,16 @@ function StepCard({
           onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 14px 8px 16px', cursor: 'pointer',
-            background: isAgent ? t.cardHeaderAgentBg : t.cardHeaderBg,
+            padding: '8px 14px', cursor: 'pointer',
+            background: t.cardHeaderBg,
             transition: 'background 0.15s', position: 'relative',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = isAgent ? t.cardHeaderAgentHover : t.cardHeaderHover }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = isAgent ? t.cardHeaderAgentBg : t.cardHeaderBg }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = t.cardHeaderHover }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = t.cardHeaderBg }}
         >
           <Icon sx={{ fontSize: 16 }} style={{ color: accentColor }} />
-          <span style={{ fontWeight: 600, color: accentColor, flex: 1, fontSize: 13, letterSpacing: '0.02em' }}>
-            {config.label}
+          <span style={{ fontWeight: 600, color: t.bodyText, flex: 1, fontSize: 13, letterSpacing: '0.02em' }}>
+            {icons.label}
           </span>
           <span style={{ color: t.dimText, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
             {formatTime(step.timestamp)}
@@ -931,13 +922,17 @@ function SessionItem({
       ? <SuccessIcon sx={{ fontSize: 14, color: c.success }} />
       : <ErrorIcon sx={{ fontSize: 14, color: c.error }} />
 
-  const typeColor = session.type === 'learn' ? '#C084FC' : c.primary
+  const typeColor = session.type === 'learn' ? c.stepLearn : c.primary
   const displayPrompt = session.type === 'learn' && session.prompt.startsWith('学习: ')
     ? session.prompt.slice(4) : session.prompt
 
   return (
     <Box
+      role="button"
+      tabIndex={0}
+      aria-label={`${session.type === 'learn' ? '学习' : '对话'}会话: ${displayPrompt}`}
       onClick={onClick}
+      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       sx={{
         display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1,
         cursor: 'pointer', borderRadius: '8px',
@@ -963,7 +958,7 @@ function SessionItem({
         <IconButton
           size="small"
           onClick={(e) => { e.stopPropagation(); onDelete() }}
-          sx={{ p: 0.25, color: c.textMuted, opacity: 0, '.MuiBox-root:hover > &': { opacity: 1 }, '&:hover': { color: c.error } }}
+          sx={{ p: 0.25, minWidth: 36, minHeight: 36, color: c.textMuted, opacity: 0, '.MuiBox-root:hover > &': { opacity: 1 }, '&:hover': { color: c.error } }}
           aria-label="删除会话"
         >
           <DeleteIcon sx={{ fontSize: 14 }} />
@@ -1209,8 +1204,8 @@ export function ThinkingPanel() {
   }, [historySessions.length])
 
   const statusColor = useMemo(() => {
-    if (isLearning) return '#C084FC'
-    if (isRunning) return c.primary
+    if (isLearning) return c.textMuted
+    if (isRunning) return c.textMuted
     return c.textMuted
   }, [isRunning, isLearning, c.primary, c.textMuted])
 
@@ -1298,8 +1293,8 @@ export function ThinkingPanel() {
           sx={{
             mb: 1.5, borderRadius: 2, height: 2, bgcolor: 'transparent', flexShrink: 0,
             '& .MuiLinearProgress-bar': {
-              bgcolor: isLearning ? '#C084FC' : c.primary,
-              boxShadow: `0 0 8px ${isLearning ? '#C084FC' : c.primary}80`,
+              bgcolor: isLearning ? c.textMuted : c.textMuted,
+              boxShadow: 'none',
             },
           }}
         />
@@ -1325,14 +1320,14 @@ export function ThinkingPanel() {
                 bgcolor: `${c.warning}06`,
               }}
             >
-              <Box sx={{ width: 3, height: 20, borderRadius: 2, bgcolor: item.type === 'learn' ? '#C084FC' : c.primary, opacity: 0.5, flexShrink: 0 }} />
+              <Box sx={{ width: 3, height: 20, borderRadius: 2, bgcolor: item.type === 'learn' ? c.stepLearn : c.primary, opacity: 0.5, flexShrink: 0 }} />
               <Typography sx={{ fontSize: 12, color: c.textSecondary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {item.prompt}
               </Typography>
               <IconButton
                 size="small"
                 onClick={() => removeFromQueue(item.id)}
-                sx={{ p: 0.25, color: c.textMuted, '&:hover': { color: c.error } }}
+                sx={{ p: 0.25, minWidth: 36, minHeight: 36, color: c.textMuted, '&:hover': { color: c.error } }}
                 aria-label="移除"
               >
                 <CloseIcon sx={{ fontSize: 14 }} />
@@ -1391,7 +1386,7 @@ export function ThinkingPanel() {
             <Button
               variant="contained" size="small"
               onClick={approvePlan}
-              sx={{ fontSize: 12, textTransform: 'none', bgcolor: c.success, '&:hover': { bgcolor: '#16A34A' } }}
+              sx={{ fontSize: 12, textTransform: 'none', bgcolor: c.success, '&:hover': { bgcolor: c.successHover } }}
             >
               批准执行
             </Button>
@@ -1417,7 +1412,7 @@ export function ThinkingPanel() {
             {pendingStep.description}
           </Typography>
           <Button size="small" variant="contained" onClick={approveStep}
-            sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, bgcolor: c.success, '&:hover': { bgcolor: '#16A34A' } }}>
+            sx={{ fontSize: 11, textTransform: 'none', minWidth: 50, bgcolor: c.success, '&:hover': { bgcolor: c.successHover } }}>
             允许
           </Button>
           <Button size="small" variant="outlined" onClick={rejectStep}
@@ -1460,14 +1455,7 @@ export function ThinkingPanel() {
                   // tool_call 类型直接渲染为 ToolCallCard（自带卡片样式）
                   if (merged.step.type === 'tool_call') {
                     return (
-                      <Box key={merged.step.id} sx={{ pl: 3.5, pb: 1, position: 'relative' }}>
-                        <Box
-                          sx={{
-                            position: 'absolute', left: 10, top: 0, bottom: 0, width: '1.5px',
-                            background: isLast ? `linear-gradient(to bottom, ${c.border} 40%, transparent 100%)` : c.border,
-                            opacity: 0.6,
-                          }}
-                        />
+                      <Box key={merged.step.id} sx={{ pb: 1 }}>
                         <ToolCallCard data={merged.step.data as ToolCallPayload} />
                       </Box>
                     )

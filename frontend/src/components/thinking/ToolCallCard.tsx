@@ -10,7 +10,7 @@ import {
   ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material'
 import type { ToolCallPayload } from '../../types'
-import { useThemeMode, useColors } from '../../ThemeContext'
+import { useColors } from '../../ThemeContext'
 
 /* ── 工具类别图标映射 ── */
 
@@ -50,17 +50,15 @@ function useCategoryColor() {
 
 function useCardTheme() {
   const c = useColors()
-  const { mode } = useThemeMode()
-  const isDark = mode === 'dark'
   return {
-    bg: isDark ? '#18191C' : '#F5F5F7',
+    bg: c.cardToolBg,
     bgHover: c.bgPanel,
     border: c.border,
     bodyText: c.text,
     mutedText: c.textMuted,
-    dimText: isDark ? '#4B5059' : '#AEAEB2',
+    dimText: c.textDim,
     resultBg: c.bg,
-    toolName: isDark ? '#D1D3DA' : '#1D1D1F',
+    toolName: c.cardToolText,
   }
 }
 
@@ -181,7 +179,7 @@ export function ToolCallCard({ data }: { data: ToolCallPayload }) {
           )}
         </Box>
 
-        <IconButton size="small" sx={{ p: 0, ml: 0.25 }} aria-label={expanded ? '收起详情' : '展开详情'}>
+        <IconButton size="small" sx={{ p: 0.5, ml: 0.25, minWidth: 32, minHeight: 32 }} aria-label={expanded ? '收起详情' : '展开详情'}>
           <ChevronRightIcon
             sx={{
               fontSize: 16,
@@ -282,7 +280,10 @@ function ToolResultContent({
       </Box>
       {isLong && (
         <Typography
+          role="button"
+          tabIndex={0}
           onClick={() => setShowFull(!showFull)}
+          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowFull(!showFull) } }}
           sx={{
             fontSize: 11,
             color: c.primary,

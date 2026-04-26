@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 export type Breakpoint = 'mobile' | 'tablet' | 'desktop'
 
@@ -11,7 +11,7 @@ interface UseResponsiveReturn {
   windowHeight: number
 }
 
-/** 响应式断点检测 Hook */
+/** 响应式断点检测 Hook（rAF 节流） */
 export function useResponsive(): UseResponsiveReturn {
   const [breakpoint, setBreakpoint] = useState<Breakpoint>(() => {
     if (typeof window === 'undefined') return 'desktop'
@@ -28,23 +28,25 @@ export function useResponsive(): UseResponsiveReturn {
     typeof window !== 'undefined' ? window.innerHeight : 800
   )
 
+  const rafId = useRef(0)
+
   const updateBreakpoint = useCallback(() => {
-    const width = window.innerWidth
-    setWindowWidth(width)
-    setWindowHeight(window.innerHeight)
+    // 取消上一帧的回调，确保每帧只执行一次
+    cancelAnimationFrame(rafId.current)
+    rafId.current = requestAnimationFrame(() => {
+      const width = window.innerWidth
+      const height = window.innerHeight
+      setWindowWidth(width)
+      setWindowHeight(height)
 
-    let newBreakpoint: Breakpoint = 'desktop'
-    if (width < 768) {
-      newBreakpoint = 'mobile'
-    } else if (width < 1024) {
-      newBreakpoint = 'tablet'
-    }
-
-    setBreakpoint((prev) => {
-      if (prev !== newBreakpoint) {
-        return newBreakpoint
+      let newBreakpoint: Breakpoint = 'desktop'
+      if (width < 768) {
+        newBreakpoint = 'mobile'
+      } else if (width < 1024) {
+        newBreakpoint = 'tablet'
       }
-      return prev
+
+      setBreakpoint((prev) => prev !== newBreakpoint ? newBreakpoint : prev)
     })
   }, [])
 
@@ -59,6 +61,7 @@ export function useResponsive(): UseResponsiveReturn {
     return () => {
       window.removeEventListener('resize', updateBreakpoint)
       window.removeEventListener('orientationchange', updateBreakpoint)
+      cancelAnimationFrame(rafId.current)
     }
   }, [updateBreakpoint])
 

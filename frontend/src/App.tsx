@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
 
 // 导入增强动画系统
 import './styles/animations.css'
@@ -8,17 +8,9 @@ import {
   Psychology as BrainIcon, Add as AddIcon,
   Menu as MenuIcon,
 } from '@mui/icons-material'
-import { GraphCanvas } from './components/graph'
-import { PersonalityPanel } from './components/personality'
-import { NodeEditor } from './components/editor'
 import { ThinkingPanel } from './components/thinking'
 import { ChatInput } from './components/chat'
-import { SettingsDialog } from './components/settings'
-import { ExportImport } from './components/graph/ExportImport'
 import { BrainSelector } from './components/brain'
-import { LoginPage } from './components/auth'
-import { PWAInstallPrompt, OfflinePage } from './components/pwa'
-import { MobileNav } from './components/mobile/MobileNav'
 import { useGraphStore } from './stores/graphStore'
 import { useAuthStore } from './stores/authStore'
 import { useBrainStore } from './stores/brainStore'
@@ -26,6 +18,22 @@ import { useTaskStore } from './stores/taskStore'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useColors } from './ThemeContext'
 import { useResponsive } from './hooks/useResponsive'
+
+// 懒加载非首屏 / 条件渲染的重型组件
+const GraphCanvas = lazy(() => import('./components/graph').then(m => ({ default: m.GraphCanvas })))
+const PersonalityPanel = lazy(() => import('./components/personality').then(m => ({ default: m.PersonalityPanel })))
+const NodeEditor = lazy(() => import('./components/editor').then(m => ({ default: m.NodeEditor })))
+const SettingsDialog = lazy(() => import('./components/settings').then(m => ({ default: m.SettingsDialog })))
+const ExportImport = lazy(() => import('./components/graph/ExportImport').then(m => ({ default: m.ExportImport })))
+const LoginPage = lazy(() => import('./components/auth').then(m => ({ default: m.LoginPage })))
+const PWAInstallPrompt = lazy(() => import('./components/pwa').then(m => ({ default: m.PWAInstallPrompt })))
+const OfflinePage = lazy(() => import('./components/pwa').then(m => ({ default: m.OfflinePage })))
+const MobileNav = lazy(() => import('./components/mobile/MobileNav').then(m => ({ default: m.MobileNav })))
+
+/** Suspense 加载占位 */
+function LazyFallback() {
+  return null
+}
 
 /** 可拖拽分割线 */
 function DragHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
@@ -59,15 +67,34 @@ function DragHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
     document.addEventListener('mouseup', onMouseUp)
   }, [onDrag])
 
+  const onKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 20 : 5
+    if (e.key === 'ArrowLeft') { e.preventDefault(); onDrag(-step) }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); onDrag(step) }
+  }, [onDrag])
+
   return (
     <Box
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整面板宽度"
+      tabIndex={0}
       onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
       sx={{
         width: 5,
         flexShrink: 0,
         cursor: 'col-resize',
         position: 'relative',
         zIndex: 5,
+        '&:focus-visible': {
+          outline: 'none',
+          '&::before': {
+            bgcolor: c.primary,
+            width: 2,
+            left: 1.5,
+          },
+        },
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -133,7 +160,7 @@ type MobileTab = 'chat' | 'graph' | 'personality'
 function MainApp() {
   useWebSocket()
   const c = useColors()
-  const { isMobile } = useResponsive()
+  const { isMobile, isTablet } = useResponsive()
 
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const user = useAuthStore((s) => s.user)
@@ -144,7 +171,7 @@ function MainApp() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createCount, setCreateCount] = useState(0)
 
-  // 移动端状态
+  // 移动端 / 平板端状态
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
 
@@ -185,12 +212,13 @@ function MainApp() {
   }, [])
 
   if (showOfflinePage) {
-    return <OfflinePage />
+    return <Suspense fallback={<LazyFallback />}><OfflinePage /></Suspense>
   }
 
   // 移动端布局
   if (isMobile) {
     return (
+      <Suspense fallback={<LazyFallback />}>
       <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
         {/* 移动端顶部栏 */}
         <Box
@@ -323,11 +351,118 @@ function MainApp() {
         <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         <PWAInstallPrompt />
       </Box>
+      </Suspense>
+    )
+  }
+
+  // 平板端布局：两栏（对话 + 图谱），左侧栏收入抽屉
+  if (isTablet) {
+    return (
+      <Suspense fallback={<LazyFallback />}>
+      <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
+        {/* 顶部工具栏 */}
+        <Box
+          component="header"
+          sx={{
+            height: 48,
+            px: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderBottom: `1px solid ${c.border}`,
+            background: c.bgPanel,
+            flexShrink: 0,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <IconButton
+              size="small"
+              onClick={() => setMobileNavOpen(true)}
+              sx={{ color: c.textMuted, mr: 0.5 }}
+              aria-label="打开侧栏"
+            >
+              <MenuIcon sx={{ fontSize: 22 }} />
+            </IconButton>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: c.primary, boxShadow: `0 0 8px ${c.primary}60` }} />
+            <Typography sx={{ fontWeight: 800, fontSize: 15, color: c.text, letterSpacing: '-0.03em' }}>
+              LLM-BRAIN
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {user && (
+              <Typography sx={{ color: c.textSecondary, fontSize: 12, mr: 0.5 }}>
+                {user.username}
+              </Typography>
+            )}
+            <ExportImport />
+            <Tooltip title="设置">
+              <IconButton size="small" onClick={() => setSettingsOpen(true)} sx={{ color: c.textMuted }} aria-label="设置">
+                <SettingsIcon sx={{ fontSize: 20 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="退出登录">
+              <IconButton size="small" onClick={logout} sx={{ color: c.textMuted }} aria-label="退出登录">
+                <LogoutIcon sx={{ fontSize: 20 }} />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Box>
+
+        {/* 主内容区：两栏 */}
+        <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          {!currentBrainId && !brainsLoading ? (
+            <NoBrainGuide onOpenCreate={() => setCreateCount(c => c + 1)} />
+          ) : (
+            <>
+              {/* 对话栏 */}
+              <Box component="main" sx={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', bgcolor: c.bgPanel }}>
+                <Box sx={{ flex: 1, overflowY: 'auto' }}>
+                  <ThinkingPanel />
+                </Box>
+                <ChatInput />
+              </Box>
+
+              <DragHandle onDrag={handleRightDrag} />
+
+              {/* 图谱栏 */}
+              <Box sx={{ width: Math.min(graphWidth, 420), flexShrink: 0, position: 'relative', bgcolor: c.bg }}>
+                <GraphCanvas />
+                {selectedNodeId && (
+                  <Box sx={{
+                    position: 'absolute', top: 12, right: 12,
+                    width: 300, maxWidth: 'calc(100% - 24px)', maxHeight: 'calc(100% - 24px)',
+                    overflowY: 'auto', borderRadius: '10px',
+                    border: `1px solid ${c.border}`, boxShadow: `0 8px 32px ${c.shadow}`,
+                    zIndex: 10, bgcolor: c.bgCard,
+                  }}>
+                    <NodeEditor />
+                  </Box>
+                )}
+              </Box>
+            </>
+          )}
+        </Box>
+
+        {/* 侧栏抽屉 */}
+        <MobileNav
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          activeTab={mobileTab}
+          onTabChange={handleMobileTabChange}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onLogout={logout}
+        />
+
+        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <PWAInstallPrompt />
+      </Box>
+      </Suspense>
     )
   }
 
   // 桌面端布局
   return (
+    <Suspense fallback={<LazyFallback />}>
     <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: c.bg }}>
       {/* 顶部工具栏 */}
       <Box
@@ -455,7 +590,7 @@ function MainApp() {
                     overflowY: 'auto',
                     borderRadius: '10px',
                     border: `1px solid ${c.border}`,
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    boxShadow: `0 8px 32px ${c.shadow}`,
                     zIndex: 10,
                     bgcolor: c.bgCard,
                   }}
@@ -472,6 +607,7 @@ function MainApp() {
       {/* PWA 安装提示 */}
       <PWAInstallPrompt />
     </Box>
+    </Suspense>
   )
 }
 
@@ -524,7 +660,7 @@ function MobileTabButton({
 // 移动端 Tab 图标组件
 function ChatIcon({ sx }: { sx?: object }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} {...(sx as object)}>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} aria-hidden="true" focusable="false" {...(sx as object)}>
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   )
@@ -532,7 +668,7 @@ function ChatIcon({ sx }: { sx?: object }) {
 
 function GraphIcon({ sx }: { sx?: object }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} {...(sx as object)}>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} aria-hidden="true" focusable="false" {...(sx as object)}>
       <circle cx="6" cy="6" r="3" />
       <circle cx="18" cy="6" r="3" />
       <circle cx="6" cy="18" r="3" />
@@ -545,7 +681,7 @@ function GraphIcon({ sx }: { sx?: object }) {
 
 function PersonalityIcon({ sx }: { sx?: object }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} {...(sx as object)}>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }} aria-hidden="true" focusable="false" {...(sx as object)}>
       <circle cx="12" cy="12" r="10" />
       <path d="M8 14s1.5 2 4 2 4-2 4-2" />
       <line x1="9" y1="9" x2="9.01" y2="9" />
@@ -573,7 +709,11 @@ function App() {
   }
 
   if (!user) {
-    return <LoginPage />
+    return (
+      <Suspense fallback={<Box sx={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: c.bg }}><CircularProgress sx={{ color: c.primary }} /></Box>}>
+        <LoginPage />
+      </Suspense>
+    )
   }
 
   return <MainApp />

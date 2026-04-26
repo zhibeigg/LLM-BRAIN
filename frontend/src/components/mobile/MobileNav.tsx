@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Box, Typography, IconButton, Drawer, Divider, List, ListItem,
+  Box, Typography, IconButton, Drawer, Divider, List, ListItemButton,
   ListItemIcon, ListItemText, Badge, Tooltip, Button,
 } from '@mui/material'
 import {
@@ -67,7 +67,7 @@ export function MobileNav({
       ModalProps={{
         BackdropProps: {
           sx: {
-            bgcolor: 'rgba(0, 0, 0, 0.5)',
+            bgcolor: c.overlay,
           },
         },
       }}
@@ -118,8 +118,7 @@ export function MobileNav({
 
       {/* 导航列表 */}
       <List sx={{ flex: 1, pt: 1 }}>
-        <ListItem
-          button
+        <ListItemButton
           onClick={() => handleNavClick('chat')}
           sx={{
             mx: 1,
@@ -140,10 +139,9 @@ export function MobileNav({
             <Badge badgeContent={queue.length} sx={{ mr: 1 }} />
           )}
           <ChevronIcon sx={{ fontSize: 18, color: c.textMuted }} />
-        </ListItem>
+        </ListItemButton>
 
-        <ListItem
-          button
+        <ListItemButton
           onClick={() => handleNavClick('graph')}
           sx={{
             mx: 1,
@@ -171,11 +169,10 @@ export function MobileNav({
             </Box>
           )}
           <ChevronIcon sx={{ fontSize: 18, color: c.textMuted }} />
-        </ListItem>
+        </ListItemButton>
 
         {currentBrainId && (
-          <ListItem
-            button
+          <ListItemButton
             onClick={() => handleNavClick('personality')}
             sx={{
               mx: 1,
@@ -193,7 +190,7 @@ export function MobileNav({
               primaryTypographyProps={{ fontSize: 14, fontWeight: activeTab === 'personality' ? 600 : 400, color: c.text }}
             />
             <ChevronIcon sx={{ fontSize: 18, color: c.textMuted }} />
-          </ListItem>
+          </ListItemButton>
         )}
       </List>
 

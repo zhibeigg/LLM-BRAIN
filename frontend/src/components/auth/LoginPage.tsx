@@ -55,7 +55,7 @@ export function LoginPage() {
           borderRadius: '16px',
           bgcolor: c.bgPanel,
           border: `1px solid ${c.border}`,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.4)',
+          boxShadow: `0 8px 40px ${c.shadow}`,
         }}
       >
         {/* Logo */}

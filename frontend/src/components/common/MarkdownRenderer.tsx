@@ -1,10 +1,36 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect, lazy, Suspense } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Box, Typography } from '@mui/material'
 import { useColors, useThemeMode } from '../../ThemeContext'
+
+// 懒加载代码高亮组件（react-syntax-highlighter 体积较大）
+const SyntaxHighlighter = lazy(() =>
+  import('react-syntax-highlighter').then(m => ({ default: m.Prism }))
+)
+
+// 缓存已加载的主题样式
+const themeCache: Record<string, Record<string, React.CSSProperties>> = {}
+
+function useCodeTheme(mode: 'dark' | 'light') {
+  const [theme, setTheme] = useState<Record<string, React.CSSProperties> | null>(themeCache[mode] ?? null)
+
+  useEffect(() => {
+    if (themeCache[mode]) {
+      setTheme(themeCache[mode])
+      return
+    }
+    const loader = mode === 'dark'
+      ? import('react-syntax-highlighter/dist/esm/styles/prism/one-dark')
+      : import('react-syntax-highlighter/dist/esm/styles/prism/one-light')
+    loader.then(m => {
+      themeCache[mode] = m.default
+      setTheme(m.default)
+    })
+  }, [mode])
+
+  return theme
+}
 
 interface MarkdownRendererProps {
   content: string
@@ -17,7 +43,7 @@ export function MarkdownRenderer({ content, color, fontSize = 13 }: MarkdownRend
   const c = useColors()
   const { mode } = useThemeMode()
   const textColor = color ?? c.text
-  const codeTheme = mode === 'dark' ? oneDark : oneLight
+  const codeTheme = useCodeTheme(mode)
 
   const components = useMemo(() => ({
     // 段落
@@ -41,25 +67,45 @@ export function MarkdownRenderer({ content, color, fontSize = 13 }: MarkdownRend
       const match = /language-(\w+)/.exec(className || '')
       const codeStr = String(children).replace(/\n$/, '')
 
+      if (match && codeTheme) {
+        return (
+          <Box sx={{ my: 1, borderRadius: '6px', overflow: 'hidden', border: `1px solid ${c.border}`, fontSize: fontSize - 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.5, bgcolor: c.bgInput, borderBottom: `1px solid ${c.border}` }}>
+              <Typography sx={{ fontSize: 11, color: c.textMuted, fontFamily: 'monospace' }}>{match[1]}</Typography>
+            </Box>
+            <Suspense fallback={
+              <Box component="pre" sx={{ m: 0, p: '12px 14px', bgcolor: c.bgInput, fontSize: fontSize - 1, fontFamily: 'monospace', color: textColor }}>
+                {codeStr}
+              </Box>
+            }>
+              <SyntaxHighlighter
+                style={codeTheme}
+                language={match[1]}
+                PreTag="div"
+                customStyle={{
+                  margin: 0,
+                  padding: '12px 14px',
+                  background: c.bgInput,
+                  fontSize: fontSize - 1,
+                }}
+              >
+                {codeStr}
+              </SyntaxHighlighter>
+            </Suspense>
+          </Box>
+        )
+      }
+
+      // 代码块但主题未加载 — 显示纯文本
       if (match) {
         return (
           <Box sx={{ my: 1, borderRadius: '6px', overflow: 'hidden', border: `1px solid ${c.border}`, fontSize: fontSize - 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.5, bgcolor: c.bgInput, borderBottom: `1px solid ${c.border}` }}>
               <Typography sx={{ fontSize: 11, color: c.textMuted, fontFamily: 'monospace' }}>{match[1]}</Typography>
             </Box>
-            <SyntaxHighlighter
-              style={codeTheme}
-              language={match[1]}
-              PreTag="div"
-              customStyle={{
-                margin: 0,
-                padding: '12px 14px',
-                background: c.bgInput,
-                fontSize: fontSize - 1,
-              }}
-            >
+            <Box component="pre" sx={{ m: 0, p: '12px 14px', bgcolor: c.bgInput, fontSize: fontSize - 1, fontFamily: 'monospace', color: textColor, whiteSpace: 'pre-wrap' }}>
               {codeStr}
-            </SyntaxHighlighter>
+            </Box>
           </Box>
         )
       }

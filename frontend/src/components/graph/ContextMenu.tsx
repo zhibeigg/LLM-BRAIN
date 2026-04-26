@@ -70,7 +70,7 @@ export function ContextMenu({
             bgcolor: c.bgCard,
             borderRadius: '10px',
             border: `1px solid ${c.border}`,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            boxShadow: `0 8px 24px ${c.shadow}`,
             minWidth: 200,
             '& .MuiMenuItem-root': {
               fontSize: 14,
@@ -87,7 +87,7 @@ export function ContextMenu({
       {targetType === 'canvas' && (
         <MenuItem key="add-memory" onClick={handleAddMemoryNode}>
           <ListItemIcon>
-            <AddIcon fontSize="small" sx={{ color: '#5B8DEF' }} />
+            <AddIcon fontSize="small" sx={{ color: c.primary }} />
           </ListItemIcon>
           <ListItemText>添加记忆节点</ListItemText>
         </MenuItem>

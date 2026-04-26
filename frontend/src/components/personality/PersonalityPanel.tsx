@@ -107,7 +107,7 @@ export function PersonalityPanel() {
                     <IconButton
                       size="small"
                       onClick={() => setDeleteConfirmId(dim.id)}
-                      sx={{ p: 0.25, color: c.textMuted, '&:hover': { color: c.error } }}
+                      sx={{ p: 0.25, minWidth: 36, minHeight: 36, color: c.textMuted, '&:hover': { color: c.error } }}
                       aria-label="删除维度"
                     >
                       <DeleteIcon sx={{ fontSize: 16 }} />

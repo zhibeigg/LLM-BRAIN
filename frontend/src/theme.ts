@@ -35,6 +35,7 @@ export const enhancedDarkColors = {
   text: '#E4E4E8',           // 主文本（原本 #BCBEC4 → 提升至 #E4E4E8）
   textSecondary: '#A8A8B0', // 次要文本（原本 #AAACB2 → 提升至 #A8A8B0）
   textMuted: '#8A8A94',     // 注释灰（提升对比度至 ~5.0:1，满足 WCAG AA）
+  textDim: '#5A5A64',       // 极淡辅助文本（仅用于装饰性/非关键信息）
   textInverse: '#0D0D0F',   // 反色文本
 
   // 状态色
@@ -74,6 +75,18 @@ export const enhancedDarkColors = {
   toolCode: '#4ADE80',       // 代码类
   toolMemory: '#C084FC',     // 记忆类
   toolUtility: '#F59E0B',    // 工具类
+
+  // 语义色 — 卡片/面板内部
+  cardToolBg: '#18191C',     // 工具卡片背景
+  cardToolText: '#D1D3DA',   // 工具卡片文本
+  cardAgentBg: '#0E0F10',    // Agent 卡片背景
+  cardAgentHeaderBg: '#1A1C1A', // Agent 卡片头部背景
+  cardAgentHeaderHover: '#252825', // Agent 卡片头部 hover
+
+  // 语义色 — hover 状态
+  successHover: '#3DA05E',   // 成功按钮 hover
+  errorHover: '#D04050',     // 错误按钮 hover
+  warningHover: '#D0A840',   // 警告按钮 hover
 }
 
 // ============================================================
@@ -108,7 +121,8 @@ export const enhancedLightColors = {
   // 文本颜色（优化对比度）
   text: '#1A1A20',           // 主文本（原本 #1D1D1F → 稍调整）
   textSecondary: '#5A5A66',  // 次要文本（原本 #6E6E73 → 提升对比度）
-  textMuted: '#9898A0',     // 注释灰（原本 #AEAEB2 → 提升）
+  textMuted: '#74747E',     // 注释灰（提升对比度至 ~4.6:1，满足 WCAG AA）
+  textDim: '#AEAEB2',       // 极淡辅助文本（仅用于装饰性/非关键信息）
   textInverse: '#FFFFFF',   // 反色文本
 
   // 状态色
@@ -148,6 +162,18 @@ export const enhancedLightColors = {
   toolCode: '#16A34A',
   toolMemory: '#9333EA',
   toolUtility: '#D97706',
+
+  // 语义色 — 卡片/面板内部
+  cardToolBg: '#F5F5F7',     // 工具卡片背景
+  cardToolText: '#1D1D1F',   // 工具卡片文本
+  cardAgentBg: '#F5FFF5',    // Agent 卡片背景
+  cardAgentHeaderBg: '#F0F5F0', // Agent 卡片头部背景
+  cardAgentHeaderHover: '#E5EDE5', // Agent 卡片头部 hover
+
+  // 语义色 — hover 状态
+  successHover: '#188844',   // 成功按钮 hover
+  errorHover: '#C02035',     // 错误按钮 hover
+  warningHover: '#C07000',   // 警告按钮 hover
 }
 
 // ============================================================

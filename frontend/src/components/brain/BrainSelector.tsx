@@ -206,7 +206,7 @@ export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}
               minWidth: 220,
               maxHeight: 400,
               border: `1px solid ${c.border}`,
-              boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+              boxShadow: `0 4px 16px ${c.shadow}`,
             },
           },
         }}
@@ -354,7 +354,7 @@ export function BrainSelector({ requestCreate }: { requestCreate?: number } = {}
           {/* 性格描述 → AI 生成 */}
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-              <AIIcon sx={{ fontSize: 16, color: '#C084FC' }} />
+              <AIIcon sx={{ fontSize: 16, color: c.stepLearn }} />
               <Typography sx={{ fontSize: 12, color: c.textSecondary }}>性格描述（AI 生成）</Typography>
             </Box>
             <TextField

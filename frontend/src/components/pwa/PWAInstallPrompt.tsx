@@ -89,7 +89,7 @@ export function PWAInstallPrompt({ onInstalled }: PWAInstallPromptProps) {
           right: 24,
           maxWidth: 360,
           zIndex: 100,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
+          boxShadow: `0 8px 32px ${c.shadow}`,
           borderRadius: 2,
           overflow: 'visible',
         }}

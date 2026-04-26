@@ -85,10 +85,10 @@ export function NodeEditor() {
           borderRadius: '10px 10px 0 0',
         }}
       >
-        <Typography sx={{ fontWeight: 700, color: '#fff', fontSize: 15 }}>
+        <Typography sx={{ fontWeight: 700, color: c.textInverse, fontSize: 15 }}>
           节点编辑
         </Typography>
-        <IconButton size="small" onClick={() => selectNode(null)} sx={{ color: '#fff', p: 0.25 }} aria-label="关闭编辑器">
+        <IconButton size="small" onClick={() => selectNode(null)} sx={{ color: c.textInverse, p: 0.25 }} aria-label="关闭编辑器">
           <CloseIcon sx={{ fontSize: 18 }} />
         </IconButton>
       </Box>

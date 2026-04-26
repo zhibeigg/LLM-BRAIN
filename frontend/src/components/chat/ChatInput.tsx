@@ -441,21 +441,21 @@ export function ChatInput() {
   const buttonConfig = {
     send: {
       color: isLearnCommand ? c.success : c.primary,
-      hoverColor: isLearnCommand ? '#22C55E' : c.primaryDark,
+      hoverColor: isLearnCommand ? c.successHover : c.primaryDark,
       icon: isLearnCommand ? <LearnIcon sx={{ fontSize: 18 }} /> : <SendIcon sx={{ fontSize: 18 }} />,
       tooltip: isLearnCommand ? '开始学习' : '发送',
       disabled: !hasInput,
     },
     queue: {
       color: c.warning,
-      hoverColor: '#D97706',
+      hoverColor: c.warningHover,
       icon: <QueueIcon sx={{ fontSize: 18 }} />,
       tooltip: '排队',
       disabled: !hasInput,
     },
     stop: {
       color: c.error,
-      hoverColor: '#DC2626',
+      hoverColor: c.errorHover,
       icon: <StopIcon sx={{ fontSize: 18 }} />,
       tooltip: `清空队列 (${pendingQueue.length})`,
       disabled: false,
@@ -463,7 +463,7 @@ export function ChatInput() {
     loading: {
       color: c.primary,
       hoverColor: c.primary,
-      icon: <CircularProgress size={18} sx={{ color: '#fff' }} />,
+      icon: <CircularProgress size={18} sx={{ color: c.textInverse }} />,
       tooltip: '执行中...',
       disabled: true,
     },
@@ -538,7 +538,7 @@ export function ChatInput() {
               <IconButton
                 size="small"
                 onClick={() => removePending(msg.id)}
-                sx={{ p: 0.15, color: c.textMuted, '&:hover': { color: c.error } }}
+                sx={{ p: 0.15, minWidth: 28, minHeight: 28, color: c.textMuted, '&:hover': { color: c.error } }}
                 aria-label="移除消息"
               >
                 <CloseIcon sx={{ fontSize: 12 }} />
@@ -582,7 +582,7 @@ export function ChatInput() {
                 onClick={() => removeAttachment(att.id)}
                 sx={{
                   position: 'absolute', top: 1, right: 1,
-                  p: 0.15, bgcolor: 'rgba(0,0,0,0.5)', color: '#fff',
+                  p: 0.15, minWidth: 28, minHeight: 28, bgcolor: c.overlay, color: '#fff',
                   '&:hover': { bgcolor: c.error },
                 }}
                 aria-label="移除附件"
@@ -776,7 +776,7 @@ export function ChatInput() {
                 height: isMobile ? 42 : 36,
                 borderRadius: isMobile ? '10px' : '8px',
                 bgcolor: btn.color,
-                color: '#fff',
+                color: c.textInverse,
                 flexShrink: 0,
                 '&:hover': { bgcolor: btn.hoverColor },
                 '&:disabled': { bgcolor: c.bgInput, color: c.textMuted },
