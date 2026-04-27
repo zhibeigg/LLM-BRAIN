@@ -6,6 +6,18 @@ type AnthropicToolUseBlock = { type: 'tool_use'; id: string; name: string; input
 type AnthropicToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string }
 type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock | AnthropicToolResultBlock
 
+type AnthropicStreamToolState = {
+  id: string
+  name: string
+  inputJson: string
+}
+
+type AnthropicToolChoice = { type: 'auto' | 'any' | 'none' } | { type: 'tool'; name: string }
+
+type AnthropicToolChoiceInput = ChatCompletionOptions['tool_choice']
+
+type AnthropicStreamToolCallDelta = NonNullable<StreamChunk['tool_calls']>[number]
+
 type AnthropicMessage = {
   role: 'user' | 'assistant'
   content: string | AnthropicContentBlock[]
@@ -32,6 +44,24 @@ export class AnthropicAdapter implements LLMProviderAdapter {
     }
   }
 
+  private toAnthropicToolChoice(toolChoice: AnthropicToolChoiceInput): AnthropicToolChoice | undefined {
+    if (!toolChoice) return undefined
+    if (toolChoice === 'auto') return { type: 'auto' }
+    if (toolChoice === 'none') return { type: 'none' }
+    if (toolChoice === 'required') return { type: 'any' }
+
+    if ('function' in toolChoice) {
+      const name = toolChoice.function.name
+      return name ? { type: 'tool', name } : { type: 'any' }
+    }
+
+    if ('name' in toolChoice) {
+      return toolChoice.name ? { type: 'tool', name: toolChoice.name } : { type: 'any' }
+    }
+
+    return undefined
+  }
+
   async chat(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
     const body = this.buildMessagesBody(options)
 
@@ -55,16 +85,75 @@ export class AnthropicAdapter implements LLMProviderAdapter {
       body: JSON.stringify(body),
     })
 
+    const toolStates = new Map<number, AnthropicStreamToolState>()
+
     yield* this.parseSSE(res, (parsed) => {
+      const index = typeof parsed.index === 'number' ? parsed.index : 0
+
+      if (parsed.type === 'content_block_start') {
+        const block = parsed.content_block as Record<string, unknown> | undefined
+        if (block?.type === 'tool_use') {
+          const serializedInput = block.input == null ? '' : JSON.stringify(block.input)
+          const input = serializedInput === '{}' ? '' : serializedInput
+          toolStates.set(index, {
+            id: typeof block.id === 'string' ? block.id : `anthropic-tool-${Date.now()}-${index}`,
+            name: typeof block.name === 'string' ? block.name : '',
+            inputJson: input,
+          })
+          return this.toStreamToolChunk(index, toolStates.get(index), input || undefined)
+        }
+      }
+
       if (parsed.type === 'content_block_delta') {
         const delta = parsed.delta as Record<string, unknown> | undefined
         if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
           return { content: delta.text, done: false }
         }
+
+        if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          const state = toolStates.get(index) ?? {
+            id: `anthropic-tool-${Date.now()}-${index}`,
+            name: '',
+            inputJson: '',
+          }
+          state.inputJson += delta.partial_json
+          toolStates.set(index, state)
+          return this.toStreamToolChunk(index, state, delta.partial_json)
+        }
       }
+
+      if (parsed.type === 'content_block_stop') {
+        const state = toolStates.get(index)
+        if (state) {
+          const chunk = this.toStreamToolChunk(index, state, state.inputJson || undefined)
+          toolStates.delete(index)
+          return chunk
+        }
+      }
+
       if (parsed.type === 'message_stop') return { content: '', done: true }
       return null
     })
+  }
+
+  private toStreamToolChunk(
+    index: number,
+    state: AnthropicStreamToolState | undefined,
+    argumentsDelta?: string,
+  ): StreamChunk | null {
+    if (!state) return null
+
+    const toolCall: AnthropicStreamToolCallDelta = {
+      index,
+      id: state.id,
+      type: 'function',
+      function: {
+        ...(state.name ? { name: state.name } : {}),
+        ...(argumentsDelta !== undefined ? { arguments: argumentsDelta } : {}),
+      },
+    }
+
+    return { content: '', done: false, tool_calls: [toolCall] }
   }
 
   private buildMessagesBody(options: ChatCompletionOptions): Record<string, unknown> {
@@ -93,7 +182,8 @@ export class AnthropicAdapter implements LLMProviderAdapter {
     if (options.temperature != null) body.temperature = options.temperature
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools.map(tool => this.toAnthropicTool(tool))
-      if (options.tool_choice === 'none') body.tool_choice = { type: 'none' }
+      const toolChoice = this.toAnthropicToolChoice(options.tool_choice)
+      if (toolChoice) body.tool_choice = toolChoice
     }
 
     return body
