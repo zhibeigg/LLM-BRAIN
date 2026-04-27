@@ -53,10 +53,15 @@ const PROVIDER_TYPE_OPTIONS: { value: LLMProviderType; label: string; defaultBas
 
 const API_MODE_OPTIONS: { value: LLMApiMode; label: string; providerType: LLMProviderType }[] = [
   { value: 'auto', label: '自动选择', providerType: 'openai' },
-  { value: 'openai-chat', label: 'Chat Completions', providerType: 'openai' },
-  { value: 'openai-responses', label: 'Responses API', providerType: 'openai' },
-  { value: 'anthropic-messages', label: 'Messages API', providerType: 'anthropic' },
+  { value: 'openai-responses', label: 'Responses', providerType: 'openai' },
+  { value: 'openai-chat', label: 'Completions', providerType: 'openai' },
+  { value: 'openai-codex', label: 'Codex', providerType: 'openai' },
+  { value: 'anthropic-messages', label: 'Messages', providerType: 'anthropic' },
 ]
+
+function getApiModeLabel(value: LLMApiMode) {
+  return API_MODE_OPTIONS.find((option) => option.value === value)?.label ?? value
+}
 
 /** 更新检查组件 */
 function UpdaterSection() {
@@ -135,7 +140,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     apiKey: string
     models: string
   }>({
-    name: '', providerType: 'openai', apiMode: 'auto', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: '',
+    name: '', providerType: 'openai', apiMode: 'openai-responses', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: '',
   })
 
   const [detecting, setDetecting] = useState<string | null>(null)
@@ -164,7 +169,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   const resetProviderForm = () => {
     setProviderForm({
-      name: '', providerType: 'openai', apiMode: 'auto',
+      name: '', providerType: 'openai', apiMode: 'openai-responses',
       baseUrl: 'https://api.openai.com/v1', apiKey: '', models: '',
     })
     setEditingProvider(null)
@@ -175,7 +180,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setProviderForm({
       name: provider.name,
       providerType: provider.providerType,
-      apiMode: provider.apiMode,
+      apiMode: provider.providerType === 'openai' && provider.apiMode === 'auto' ? 'openai-responses' : provider.apiMode,
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
       models: provider.models.join(', '),
@@ -338,11 +343,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     <>
       <Dialog open={open} onClose={onClose} fullScreen
         PaperProps={{ sx: { bgcolor: c.bg, backgroundImage: 'none' } }}>
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           borderBottom: `1px solid ${c.border}`, bgcolor: c.bgPanel,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, color: c.text }}>系统设置</Typography>
+          <Typography component="h2" variant="h6" sx={{ m: 0, fontWeight: 600, color: c.text }}>系统设置</Typography>
           <IconButton onClick={onClose} size="small" sx={{ color: c.textMuted }} aria-label="关闭设置"><CloseIcon /></IconButton>
         </DialogTitle>
 
@@ -538,7 +543,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             setProviderForm((f) => ({
                               ...f,
                               providerType,
-                              apiMode: providerType === 'anthropic' ? 'anthropic-messages' : 'auto',
+                              apiMode: providerType === 'anthropic' ? 'anthropic-messages' : 'openai-responses',
                               baseUrl: option?.defaultBaseUrl ?? f.baseUrl,
                             }))
                           }}>
@@ -547,15 +552,46 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           ))}
                         </Select>
                       </FormControl>
-                      <FormControl size="small" fullWidth>
-                        <InputLabel>API 模式</InputLabel>
-                        <Select value={providerForm.apiMode} label="API 模式"
-                          onChange={(e) => setProviderForm((f) => ({ ...f, apiMode: e.target.value as LLMApiMode }))}>
-                          {API_MODE_OPTIONS.filter((option) => option.providerType === providerForm.providerType).map((option) => (
-                            <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                        <Typography variant="caption" sx={{ color: c.textMuted, fontWeight: 600 }}>API 模式</Typography>
+                        <Typography variant="caption" sx={{ color: c.textMuted }}>
+                          {providerForm.providerType === 'openai'
+                            ? 'GPT-4 及更老模型、国产模型选择 Completions。GPT-4o 及更新模型选择 Responses。从 Codex 反代出来的选择 Codex（支持思考强度）。'
+                            : 'Claude 使用 Messages API。'}
+                        </Typography>
+                        <ToggleButtonGroup
+                          value={providerForm.apiMode}
+                          exclusive
+                          size="small"
+                          onChange={(_, value: LLMApiMode | null) => {
+                            if (value) setProviderForm((f) => ({ ...f, apiMode: value }))
+                          }}
+                          sx={{
+                            display: 'grid',
+                            gridTemplateColumns: providerForm.providerType === 'openai' ? 'repeat(3, 1fr)' : '1fr',
+                            gap: 0.5,
+                            '& .MuiToggleButton-root': {
+                              minWidth: 0,
+                              border: `1px solid ${c.border}`,
+                              borderRadius: '6px !important',
+                              color: c.textSecondary,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              textTransform: 'none',
+                              '&.Mui-selected': {
+                                color: c.text,
+                                bgcolor: c.bgHover,
+                              },
+                            },
+                          }}
+                        >
+                          {API_MODE_OPTIONS
+                            .filter((option) => option.providerType === providerForm.providerType && option.value !== 'auto')
+                            .map((option) => (
+                              <ToggleButton key={option.value} value={option.value}>{option.label}</ToggleButton>
+                            ))}
+                        </ToggleButtonGroup>
+                      </Box>
                     </Box>
                     <TextField label="Base URL" size="small" value={providerForm.baseUrl}
                       onChange={(e) => setProviderForm((f) => ({ ...f, baseUrl: e.target.value }))}
@@ -598,7 +634,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                               </Typography>
                               <Chip label={provider.providerType === 'anthropic' ? 'Anthropic' : 'OpenAI'} size="small"
                                 sx={{ height: 22, fontSize: 12, bgcolor: `${c.secondary}15`, color: c.secondary, border: `1px solid ${c.secondary}30` }} />
-                              <Chip label={provider.apiMode} size="small"
+                              <Chip label={getApiModeLabel(provider.apiMode)} size="small"
                                 sx={{ height: 22, fontSize: 12, bgcolor: `${c.primary}10`, color: c.textMuted, border: `1px solid ${c.border}` }} />
                               <Chip label={`${provider.models.length} 个模型`} size="small"
                                 sx={{

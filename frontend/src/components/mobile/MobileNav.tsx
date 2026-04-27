@@ -1,11 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback } from 'react'
 import {
   Box, Typography, IconButton, Drawer, Divider, List, ListItemButton,
   ListItemIcon, ListItemText, Badge, Tooltip, Button,
 } from '@mui/material'
 import {
   Close as CloseIcon,
-  Psychology as BrainIcon,
   Psychology as PersonalityIcon,
   AccountTree as GraphIcon,
   Chat as ChatIcon,
@@ -19,7 +18,6 @@ import { useTaskStore } from '../../stores/taskStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useColors } from '../../ThemeContext'
 import { BrainSelector } from '../brain'
-import { PersonalityPanel } from '../personality'
 
 interface MobileNavProps {
   open: boolean

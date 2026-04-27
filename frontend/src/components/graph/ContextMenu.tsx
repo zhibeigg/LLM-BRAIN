@@ -84,14 +84,20 @@ export function ContextMenu({
         },
       }}
     >
-      {targetType === 'canvas' && (
+      {targetType === 'canvas' && [
         <MenuItem key="add-memory" onClick={handleAddMemoryNode}>
           <ListItemIcon>
             <AddIcon fontSize="small" sx={{ color: c.primary }} />
           </ListItemIcon>
           <ListItemText>添加记忆节点</ListItemText>
-        </MenuItem>
-      )}
+        </MenuItem>,
+        <MenuItem key="add-personality" onClick={handleAddPersonalityNode}>
+          <ListItemIcon>
+            <AddIcon fontSize="small" sx={{ color: c.secondary }} />
+          </ListItemIcon>
+          <ListItemText>添加性格节点</ListItemText>
+        </MenuItem>,
+      ]}
 
       {targetType === 'node' && [
         <MenuItem key="edit" onClick={handleEditNode}>

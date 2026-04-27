@@ -26,6 +26,7 @@ export function getDb(): Database.Database {
     migrateAddUserId(db)
     migrateAddProjectPath(db)
     migrateAddProviderApiFields(db)
+    migrateExecutionHistoryUncertainStatus(db)
     migrateAddIndexes(db)
   }
   return db
@@ -147,7 +148,7 @@ function initTables(db: Database.Database): void {
       task_prompt TEXT NOT NULL,
       path_taken TEXT NOT NULL DEFAULT '[]',
       result TEXT,
-      status TEXT NOT NULL CHECK(status IN ('success', 'failure', 'loop_detected')),
+      status TEXT NOT NULL CHECK(status IN ('success', 'failure', 'uncertain', 'loop_detected')),
       boss_feedback TEXT,
       retry_count INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL
@@ -245,6 +246,43 @@ function migrateAddProviderApiFields(db: Database.Database): void {
     db.exec(`ALTER TABLE llm_providers ADD COLUMN api_mode TEXT NOT NULL DEFAULT 'auto'`)
     console.log('数据库迁移完成：llm_providers 表已添加 api_mode 列')
   }
+}
+
+/** 迁移：允许 Boss 将执行历史标记为 uncertain，避免误输入触发重试 */
+function migrateExecutionHistoryUncertainStatus(db: Database.Database): void {
+  const table = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='execution_history'`).get() as { sql?: string } | undefined
+  if (table?.sql?.includes("'uncertain'")) return
+
+  const columns = db.prepare("PRAGMA table_info(execution_history)").all() as Array<{ name: string }>
+  const hasBrainId = columns.some(c => c.name === 'brain_id')
+  const brainIdSelect = hasBrainId ? "COALESCE(brain_id, '')" : "''"
+
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE execution_history_new (
+        id TEXT PRIMARY KEY,
+        brain_id TEXT NOT NULL DEFAULT '',
+        task_prompt TEXT NOT NULL,
+        path_taken TEXT NOT NULL DEFAULT '[]',
+        result TEXT,
+        status TEXT NOT NULL CHECK(status IN ('success', 'failure', 'uncertain', 'loop_detected')),
+        boss_feedback TEXT,
+        retry_count INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+    `)
+
+    db.exec(`
+      INSERT INTO execution_history_new (id, brain_id, task_prompt, path_taken, result, status, boss_feedback, retry_count, created_at)
+      SELECT id, ${brainIdSelect}, task_prompt, path_taken, result, status, boss_feedback, retry_count, created_at
+      FROM execution_history;
+    `)
+
+    db.exec(`DROP TABLE execution_history`)
+    db.exec(`ALTER TABLE execution_history_new RENAME TO execution_history`)
+  })()
+
+  console.log('数据库迁移完成：execution_history.status 已支持 uncertain')
 }
 
 /** 迁移：为 nodes 和 edges 表添加缺失的索引 */

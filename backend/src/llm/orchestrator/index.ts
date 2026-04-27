@@ -297,11 +297,16 @@ export class Orchestrator {
 
     // ── Boss 验证 ──
     this.checkAborted()
-    const { passed, isLoop } = await this.bossOrchestrator.verify(
+    const { passed, isLoop, uncertain } = await this.bossOrchestrator.verify(
       taskPrompt,
       agentResult,
       visitedPath
     )
+
+    if (uncertain) {
+      // 不确定通常代表误输入、需求不明确或继续重试价值不足：直接停止，避免重复消耗 token。
+      return agentResult
+    }
 
     if (!passed && !isLoop) {
       this.difficultyAdjuster.adjustPathDifficulty(visitedPath, false)

@@ -302,6 +302,8 @@ html, body, #root {
   50% { opacity: 1; }
 }
 
+/* Leader 决策前的候选轮选由 React 状态驱动：同一时间仅一个候选项亮起 */
+
 /* 打勾图标弹入 */
 @keyframes checkIn {
   0% { transform: scale(0); opacity: 0; }
@@ -311,6 +313,17 @@ html, body, #root {
 
 .candidate-pulse {
   animation: candidatePulse 1.4s ease-in-out infinite;
+}
+
+.candidate-row {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.candidate-row > * {
+  position: relative;
+  z-index: 1;
 }
 
 .candidate-check-in {

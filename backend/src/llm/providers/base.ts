@@ -43,9 +43,21 @@ export interface ChatCompletionResult {
   }
 }
 
+export interface StreamToolCallDelta {
+  index: number
+  id?: string
+  type?: 'function'
+  function?: {
+    name?: string
+    arguments?: string
+  }
+}
+
 export interface StreamChunk {
   content: string
   done: boolean
+  /** 流式工具调用增量（OpenAI Chat Completions 的 delta.tool_calls 形态） */
+  tool_calls?: StreamToolCallDelta[]
 }
 
 /** 重试配置 */

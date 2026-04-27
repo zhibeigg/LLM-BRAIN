@@ -1,5 +1,5 @@
 import type { LLMApiMode } from '../../types/index.js'
-import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, StreamChunk, RetryConfig } from './base.js'
+import type { LLMProviderAdapter, ChatCompletionOptions, ChatCompletionResult, StreamChunk, StreamToolCallDelta, RetryConfig } from './base.js'
 import { DEFAULT_RETRY_CONFIG, isRetryableStatus, computeBackoff } from './base.js'
 
 export class OpenAIAdapter implements LLMProviderAdapter {
@@ -18,7 +18,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
   }
 
   private get useResponsesApi(): boolean {
-    if (this.apiMode === 'openai-responses') return true
+    if (this.apiMode === 'openai-responses' || this.apiMode === 'openai-codex') return true
     if (this.apiMode === 'openai-chat') return false
 
     const model = this.model.toLowerCase()
@@ -116,6 +116,10 @@ export class OpenAIAdapter implements LLMProviderAdapter {
     if (options.temperature != null) body.temperature = options.temperature
     if (options.maxTokens != null) body.max_tokens = options.maxTokens
     if (options.responseFormat === 'json') body.response_format = { type: 'json_object' }
+    if (options.tools && options.tools.length > 0) {
+      body.tools = options.tools
+      body.tool_choice = this.toChatToolChoice(options.tool_choice) ?? 'auto'
+    }
 
     const res = await this.fetchStreamWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -130,7 +134,20 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       const delta = choice.delta as Record<string, unknown> | undefined
       const content = (delta?.content as string) ?? ''
       const done = choice.finish_reason != null
-      return (content || done) ? { content, done } : null
+      const rawToolCalls = delta?.tool_calls as Array<Record<string, unknown>> | undefined
+      const toolCalls = rawToolCalls?.map((tc): StreamToolCallDelta => {
+        const fn = tc.function as Record<string, unknown> | undefined
+        return {
+          index: typeof tc.index === 'number' ? tc.index : 0,
+          id: typeof tc.id === 'string' ? tc.id : undefined,
+          type: tc.type === 'function' ? 'function' : undefined,
+          function: fn ? {
+            name: typeof fn.name === 'string' ? fn.name : undefined,
+            arguments: typeof fn.arguments === 'string' ? fn.arguments : undefined,
+          } : undefined,
+        }
+      })
+      return (content || done || (toolCalls && toolCalls.length > 0)) ? { content, done, tool_calls: toolCalls } : null
     })
   }
 
@@ -197,7 +214,7 @@ export class OpenAIAdapter implements LLMProviderAdapter {
 
   private async chatResponses(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
     const body = this.buildResponsesInput(options)
-    console.log(`[OpenAI-Responses] POST ${this.baseUrl}/responses, tools=${(body.tools as unknown[])?.length ?? 0}, model=${this.model}`)
+    console.log(`[${this.apiMode === 'openai-codex' ? 'OpenAI-Codex' : 'OpenAI-Responses'}] POST ${this.baseUrl}/responses, tools=${(body.tools as unknown[])?.length ?? 0}, model=${this.model}`)
 
     const res = await this.fetchWithRetry(`${this.baseUrl}/responses`, {
       method: 'POST',
@@ -281,6 +298,58 @@ export class OpenAIAdapter implements LLMProviderAdapter {
       if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
         return { content: parsed.delta, done: false }
       }
+
+      if (parsed.type === 'response.output_item.added') {
+        const item = parsed.item as Record<string, unknown> | undefined
+        if (item?.type === 'function_call') {
+          return {
+            content: '',
+            done: false,
+            tool_calls: [{
+              index: typeof parsed.output_index === 'number' ? parsed.output_index : 0,
+              id: typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : undefined,
+              type: 'function',
+              function: {
+                name: typeof item.name === 'string' ? item.name : undefined,
+                arguments: typeof item.arguments === 'string' ? item.arguments : undefined,
+              },
+            }],
+          }
+        }
+      }
+
+      if (parsed.type === 'response.function_call_arguments.delta' && typeof parsed.delta === 'string') {
+        return {
+          content: '',
+          done: false,
+          tool_calls: [{
+            index: typeof parsed.output_index === 'number' ? parsed.output_index : 0,
+            id: typeof parsed.call_id === 'string' ? parsed.call_id : typeof parsed.item_id === 'string' ? parsed.item_id : undefined,
+            type: 'function',
+            function: { arguments: parsed.delta },
+          }],
+        }
+      }
+
+      if (parsed.type === 'response.output_item.done') {
+        const item = parsed.item as Record<string, unknown> | undefined
+        if (item?.type === 'function_call') {
+          return {
+            content: '',
+            done: false,
+            tool_calls: [{
+              index: typeof parsed.output_index === 'number' ? parsed.output_index : 0,
+              id: typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : undefined,
+              type: 'function',
+              function: {
+                name: typeof item.name === 'string' ? item.name : undefined,
+                arguments: typeof item.arguments === 'string' ? item.arguments : undefined,
+              },
+            }],
+          }
+        }
+      }
+
       if (parsed.type === 'response.completed') return { content: '', done: true }
       return null
     })

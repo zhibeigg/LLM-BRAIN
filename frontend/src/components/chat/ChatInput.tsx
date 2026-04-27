@@ -500,6 +500,11 @@ export function ChatInput() {
     handleSend()
   }, [buttonMode, handleSend, executionMode])
 
+  const handleModeMenuOpen = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur()
+    setModeMenuAnchor(event.currentTarget)
+  }, [])
+
   return (
     <Box
       sx={{
@@ -669,7 +674,7 @@ export function ChatInput() {
           <Tooltip title={currentModeConfig.label}>
             <IconButton
               size="small"
-              onClick={(e) => setModeMenuAnchor(e.currentTarget)}
+              onClick={handleModeMenuOpen}
               sx={{
                 color: currentModeConfig.color,
                 '&:hover': { bgcolor: `${currentModeConfig.color}15` },

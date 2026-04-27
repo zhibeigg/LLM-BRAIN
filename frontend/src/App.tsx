@@ -223,6 +223,16 @@ function MainApp() {
     setMobileTab(tab)
   }, [])
 
+  // 打开模态框前先移除触发按钮焦点，避免 #root 被 aria-hidden 时仍包含焦点元素
+  const handleOpenSettings = useCallback(() => {
+    const activeElement = document.activeElement
+    if (activeElement instanceof HTMLElement) {
+      activeElement.blur()
+    }
+    setMobileNavOpen(false)
+    requestAnimationFrame(() => setSettingsOpen(true))
+  }, [])
+
   // 离线状态检测和显示
   const [showOfflinePage, setShowOfflinePage] = useState(() => !navigator.onLine)
   useEffect(() => {
@@ -293,7 +303,7 @@ function MainApp() {
             )}
             <IconButton
               size="small"
-              onClick={() => setSettingsOpen(true)}
+              onClick={handleOpenSettings}
               sx={{ color: c.textMuted }}
               aria-label="设置"
             >
@@ -373,7 +383,7 @@ function MainApp() {
           onClose={() => setMobileNavOpen(false)}
           activeTab={mobileTab}
           onTabChange={handleMobileTabChange}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={handleOpenSettings}
           onLogout={logout}
         />
 
@@ -425,7 +435,7 @@ function MainApp() {
             )}
             <ExportImport />
             <Tooltip title="设置">
-              <IconButton size="small" onClick={() => setSettingsOpen(true)} sx={{ color: c.textMuted }} aria-label="设置">
+              <IconButton size="small" onClick={handleOpenSettings} sx={{ color: c.textMuted }} aria-label="设置">
                 <SettingsIcon sx={{ fontSize: 20 }} />
               </IconButton>
             </Tooltip>
@@ -480,7 +490,7 @@ function MainApp() {
           onClose={() => setMobileNavOpen(false)}
           activeTab={mobileTab}
           onTabChange={handleMobileTabChange}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={handleOpenSettings}
           onLogout={logout}
         />
 
@@ -524,9 +534,6 @@ function MainApp() {
           >
             LLM-BRAIN
           </Typography>
-          <Typography sx={{ color: c.textMuted, fontSize: 13, ml: 0.5 }}>
-            有向记忆图智能体
-          </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           {user && (
@@ -538,7 +545,7 @@ function MainApp() {
           <Tooltip title="设置">
             <IconButton
               size="small"
-              onClick={() => setSettingsOpen(true)}
+              onClick={handleOpenSettings}
               sx={{ color: c.textMuted, '&:hover': { color: c.primary, bgcolor: `${c.primary}15` } }}
               aria-label="设置"
             >

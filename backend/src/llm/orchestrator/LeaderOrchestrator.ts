@@ -1,5 +1,5 @@
 import type { ExecutionMode, PersonalityDimension, DifficultyPersonalityMapping, MemoryNode, ExecutionSnapshot } from '../../types/index.js'
-import type { OpenAIToolDef } from '../providers/base.js'
+import type { ChatCompletionResult, ChatMessage, OpenAIToolDef, StreamToolCallDelta } from '../providers/base.js'
 import { broadcast } from '../../ws/server.js'
 import { LeaderRole } from '../roles/leader.js'
 import { getEdgesBySourceId, updateEdge } from '../../db/edges.js'
@@ -7,6 +7,7 @@ import { getNodeById } from '../../db/nodes.js'
 import { computePerceivedDifficulty } from '../../core/difficulty/engine.js'
 import { getRoleConfig } from '../../db/llm-config.js'
 import type { LeaderStepPayload, LeaderDecisionPayload, LLMTrace, LeaderReturnPayload } from '../../types/index.js'
+import { extractPartialJsonNullableStringField, extractPartialJsonStringField } from '../../utils/stream-json.js'
 import type { ApprovalResult } from './ApprovalManager.js'
 
 /**
@@ -48,6 +49,64 @@ function buildLeaderDecisionTool(validEdgeIds: string[]): OpenAIToolDef {
   }
 }
 
+interface StreamedLeaderResult {
+  result: ChatCompletionResult
+  streamed: boolean
+  rawResponse: string
+}
+
+type ToolCallAccumulator = NonNullable<ChatCompletionResult['tool_calls']>[number]
+
+function mergeToolCallDelta(callsByIndex: Map<number, ToolCallAccumulator>, delta: StreamToolCallDelta): void {
+  const index = Number.isFinite(delta.index) ? delta.index : callsByIndex.size
+  let call = callsByIndex.get(index)
+  if (!call) {
+    call = {
+      id: delta.id || `leader-stream-${Date.now()}-${index}`,
+      type: 'function',
+      function: { name: '', arguments: '' },
+    }
+    callsByIndex.set(index, call)
+  }
+
+  if (delta.id) call.id = delta.id
+  if (delta.type === 'function') call.type = 'function'
+  if (delta.function?.name) {
+    const name = delta.function.name
+    if (!call.function.name || name === call.function.name || name.startsWith(call.function.name)) {
+      call.function.name = name
+    } else {
+      call.function.name += name
+    }
+  }
+  if (delta.function?.arguments) {
+    const args = delta.function.arguments
+    if (args.startsWith('{') && call.function.arguments && args.length >= call.function.arguments.length) {
+      call.function.arguments = args
+    } else {
+      call.function.arguments += args
+    }
+  }
+}
+
+function buildStreamedToolCalls(callsByIndex: Map<number, ToolCallAccumulator>): NonNullable<ChatCompletionResult['tool_calls']> | undefined {
+  const calls = [...callsByIndex.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, call]) => call)
+    .filter(call => call.function.name.trim().length > 0)
+
+  return calls.length > 0 ? calls : undefined
+}
+
+function extractPartialDecision(raw: string): Partial<{ action: string; edgeId: string | null; reason: string; thinking: string }> {
+  return {
+    action: extractPartialJsonStringField(raw, ['action']),
+    edgeId: extractPartialJsonNullableStringField(raw, ['edgeId', 'selectedEdgeId', 'edge_id', 'chosenEdgeId']) as string | null | undefined,
+    reason: extractPartialJsonStringField(raw, ['reason', 'reasoning', 'explanation']),
+    thinking: extractPartialJsonStringField(raw, ['thinking', 'thought', 'analysis']),
+  }
+}
+
 export class DifficultyAdjuster {
   /**
    * 调整路径难度
@@ -72,6 +131,75 @@ export class DifficultyAdjuster {
  */
 export class LeaderOrchestrator {
   private leader = new LeaderRole()
+
+  private async streamLeaderDecision(
+    leaderInput: string,
+    leaderTool: OpenAIToolDef,
+    stepIndex: number,
+    currentNodeId: string,
+    candidates: LeaderStepPayload['candidates'],
+    totalSteps: number,
+  ): Promise<StreamedLeaderResult> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: this.leader.systemPrompt },
+      { role: 'user', content: leaderInput },
+    ]
+    const callsByIndex = new Map<number, ToolCallAccumulator>()
+    let streamed = false
+    let rawContent = ''
+    let lastThinking = ''
+    let lastReason = ''
+
+    for await (const chunk of this.leader.chatStreamWithMessages(
+      messages,
+      [leaderTool],
+      { type: 'function', function: { name: 'choose_leader_path' } },
+    )) {
+      rawContent += chunk.content
+      for (const toolDelta of chunk.tool_calls ?? []) {
+        mergeToolCallDelta(callsByIndex, toolDelta)
+      }
+
+      const toolCalls = buildStreamedToolCalls(callsByIndex)
+      const leaderToolCall = toolCalls?.find(tc => tc.function.name === 'choose_leader_path')
+      const rawDecision = leaderToolCall?.function.arguments || rawContent
+      const partial = extractPartialDecision(rawDecision)
+
+      if (partial.thinking && partial.thinking !== lastThinking) {
+        lastThinking = partial.thinking
+        streamed = true
+        broadcast('leader_step', {
+          stepIndex,
+          currentNodeId,
+          candidates,
+          thinking: lastThinking,
+          done: false,
+        } satisfies LeaderStepPayload)
+      }
+
+      if (partial.reason && partial.reason !== lastReason) {
+        lastReason = partial.reason
+        streamed = true
+        broadcast('leader_decision', {
+          stepIndex,
+          chosenEdgeId: partial.edgeId ?? null,
+          reason: lastReason,
+          totalSteps,
+          done: false,
+        } satisfies LeaderDecisionPayload)
+      }
+    }
+
+    const toolCalls = buildStreamedToolCalls(callsByIndex)
+    return {
+      result: {
+        content: rawContent,
+        tool_calls: toolCalls,
+      },
+      streamed,
+      rawResponse: toolCalls?.find(tc => tc.function.name === 'choose_leader_path')?.function.arguments ?? rawContent,
+    }
+  }
 
   /**
    * 执行 Leader 决策循环
@@ -172,12 +300,38 @@ export class LeaderOrchestrator {
 
       const startTime = Date.now()
       const leaderTool = buildLeaderDecisionTool(candidates.map(c => c.edge.id))
-      const leaderResult = await this.leader.chat(
-        leaderInput,
-        undefined,
-        [leaderTool],
-        { type: 'function', function: { name: 'choose_leader_path' } }
-      )
+
+      // 先创建路径卡片，再在 LLM 流式返回 tool arguments 时增量填充 thinking/reason。
+      broadcast('leader_step', {
+        stepIndex,
+        currentNodeId: currentNode.id,
+        candidates: candidatesPayload,
+        thinking: '',
+        done: false,
+      } satisfies LeaderStepPayload)
+
+      let leaderResult: ChatCompletionResult
+      let streamedLeaderRaw = ''
+      try {
+        const streamed = await this.streamLeaderDecision(
+          leaderInput,
+          leaderTool,
+          stepIndex,
+          currentNode.id,
+          candidatesPayload,
+          totalSteps,
+        )
+        leaderResult = streamed.result
+        streamedLeaderRaw = streamed.rawResponse
+      } catch (err) {
+        console.warn(`[Leader] stream decision failed, fallback to non-stream chat: ${err instanceof Error ? err.message : String(err)}`)
+        leaderResult = await this.leader.chat(
+          leaderInput,
+          undefined,
+          [leaderTool],
+          { type: 'function', function: { name: 'choose_leader_path' } }
+        )
+      }
       const latencyMs = Date.now() - startTime
       let decision: { action: string; edgeId: string | null; reason: string; thinking: string }
 
@@ -278,24 +432,27 @@ export class LeaderOrchestrator {
       const leaderTrace: LLMTrace = {
         model: leaderResult.model,
         prompt: leaderInput,
-        rawResponse: leaderToolCall?.function.arguments ?? leaderResult.content,
+        rawResponse: leaderToolCall?.function.arguments ?? (streamedLeaderRaw || leaderResult.content),
         latencyMs,
         ...(leaderResult.usage ? { tokenUsage: { prompt: leaderResult.usage.promptTokens, completion: leaderResult.usage.completionTokens } } : {}),
       }
 
-      // 先发 leader_step（带完整 candidates + thinking + trace），再发 leader_decision
+      // 最终确认 leader_step / leader_decision，前端会合并到流式卡片中。
       broadcast('leader_step', {
         stepIndex,
         currentNodeId: currentNode.id,
         candidates: candidatesPayload,
         thinking: decision.thinking || '',
+        done: true,
         trace: leaderTrace,
       } satisfies LeaderStepPayload)
 
       broadcast('leader_decision', {
+        stepIndex,
         chosenEdgeId: decision.edgeId,
         reason: decision.reason,
         totalSteps,
+        done: true,
       } satisfies LeaderDecisionPayload)
 
       // ── supervised 模式：每步决策后等待确认（支持回退） ──

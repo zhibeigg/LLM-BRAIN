@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Box, Typography, TextField, Button, Alert } from '@mui/material'
-import { Psychology as BrainIcon } from '@mui/icons-material'
 import { useAuthStore } from '../../stores/authStore'
 import { useColors } from '../../ThemeContext'
 

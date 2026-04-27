@@ -94,6 +94,9 @@ interface TaskExecutionActions {
   setCurrentTaskPrompt: (prompt: string | null) => void
   reset: () => void
   addThinkingStep: (step: ThinkingStep) => void
+  mergeLeaderStep: (payload: LeaderStepPayload, timestamp: number) => boolean
+  mergeLeaderDecision: (payload: LeaderDecisionPayload, timestamp: number) => boolean
+  mergeBossVerdict: (payload: BossVerdictPayload, timestamp: number) => boolean
   mergeAgentStream: (payload: AgentStreamPayload, timestamp: number) => void
   addToolCall: (payload: ToolCallPayload, timestamp: number) => void
   updateToolCall: (callId: string, payload: ToolCallPayload, timestamp: number) => void
@@ -173,6 +176,113 @@ export const useTaskExecutionStore = create<TaskExecutionStore>()(
       set((state) => {
         state.thinkingSteps.push(step)
       }),
+
+    mergeLeaderStep: (payload, timestamp) => {
+      let created = false
+      set((state) => {
+        const step = state.thinkingSteps.find(
+          (s: ThinkingStep) => s.type === 'leader_step'
+            && (s.data as LeaderStepPayload).stepIndex === payload.stepIndex
+            && (s.data as LeaderStepPayload).currentNodeId === payload.currentNodeId
+        )
+        if (step) {
+          const prevData = step.data as LeaderStepPayload
+          step.timestamp = timestamp
+          step.data = {
+            ...prevData,
+            ...payload,
+            candidates: payload.candidates.length > 0 ? payload.candidates : prevData.candidates,
+            thinking: payload.thinking || prevData.thinking,
+            trace: payload.trace ?? prevData.trace,
+            done: payload.done ?? prevData.done,
+          }
+        } else {
+          created = true
+          state.thinkingSteps.push({
+            id: `leader-step-${payload.stepIndex}-${Date.now()}`,
+            type: 'leader_step',
+            timestamp,
+            data: payload,
+          })
+        }
+      })
+      return created
+    },
+
+    mergeLeaderDecision: (payload, timestamp) => {
+      let created = false
+      set((state) => {
+        let step: ThinkingStep | undefined
+        for (let i = state.thinkingSteps.length - 1; i >= 0; i--) {
+          const candidate = state.thinkingSteps[i]
+          if (candidate.type !== 'leader_decision') continue
+          const data = candidate.data as LeaderDecisionPayload
+          const sameStep = payload.stepIndex != null
+            ? data.stepIndex === payload.stepIndex
+            : data.done === false && data.totalSteps === payload.totalSteps
+          if (sameStep) {
+            step = candidate
+            break
+          }
+        }
+
+        if (step) {
+          const prevData = step.data as LeaderDecisionPayload
+          step.timestamp = timestamp
+          step.data = {
+            ...prevData,
+            ...payload,
+            reason: payload.reason || prevData.reason,
+            trace: payload.trace ?? prevData.trace,
+            done: payload.done ?? prevData.done,
+          }
+        } else {
+          created = true
+          state.thinkingSteps.push({
+            id: `leader-decision-${payload.stepIndex ?? payload.totalSteps}-${Date.now()}`,
+            type: 'leader_decision',
+            timestamp,
+            data: payload,
+          })
+        }
+      })
+      return created
+    },
+
+    mergeBossVerdict: (payload, timestamp) => {
+      let created = false
+      set((state) => {
+        let step: ThinkingStep | undefined
+        for (let i = state.thinkingSteps.length - 1; i >= 0; i--) {
+          const candidate = state.thinkingSteps[i]
+          if (candidate.type === 'boss_verdict' && (candidate.data as BossVerdictPayload).done === false) {
+            step = candidate
+            break
+          }
+        }
+
+        if (step) {
+          const prevData = step.data as BossVerdictPayload
+          step.timestamp = timestamp
+          step.data = {
+            ...prevData,
+            ...payload,
+            feedback: payload.feedback || prevData.feedback,
+            trace: payload.trace ?? prevData.trace,
+            done: payload.done ?? prevData.done,
+          }
+        } else {
+          created = true
+          state.thinkingSteps.push({
+            id: `boss-verdict-${Date.now()}`,
+            type: 'boss_verdict',
+            timestamp,
+            data: payload,
+          })
+        }
+      })
+      return created
+    },
 
     mergeAgentStream: (payload, timestamp) =>
       set((state) => {
@@ -551,6 +661,9 @@ interface LegacyTaskStoreState {
 
 interface LegacyTaskStoreActions {
   addThinkingStep: (step: ThinkingStep) => void
+  mergeLeaderStep: (payload: LeaderStepPayload, timestamp: number) => boolean
+  mergeLeaderDecision: (payload: LeaderDecisionPayload, timestamp: number) => boolean
+  mergeBossVerdict: (payload: BossVerdictPayload, timestamp: number) => boolean
   mergeAgentStream: (payload: AgentStreamPayload, timestamp: number) => void
   addToolCall: (payload: ToolCallPayload, timestamp: number) => void
   updateToolCall: (callId: string, payload: ToolCallPayload, timestamp: number) => void
@@ -707,6 +820,9 @@ const legacyStore = create<LegacyTaskStore>()(
     },
     // Actions - delegate to respective stores
     addThinkingStep: (step) => useTaskExecutionStore.getState().addThinkingStep(step),
+    mergeLeaderStep: (payload, timestamp) => useTaskExecutionStore.getState().mergeLeaderStep(payload, timestamp),
+    mergeLeaderDecision: (payload, timestamp) => useTaskExecutionStore.getState().mergeLeaderDecision(payload, timestamp),
+    mergeBossVerdict: (payload, timestamp) => useTaskExecutionStore.getState().mergeBossVerdict(payload, timestamp),
     mergeAgentStream: (payload, timestamp) => useTaskExecutionStore.getState().mergeAgentStream(payload, timestamp),
     addToolCall: (payload, timestamp) => useTaskExecutionStore.getState().addToolCall(payload, timestamp),
     updateToolCall: (callId, payload, timestamp) => useTaskExecutionStore.getState().updateToolCall(callId, payload, timestamp),
@@ -942,6 +1058,9 @@ const legacyGetState = (): LegacyTaskStore => {
     executionMode: queueState.executionMode,
     autoReview: queueState.autoReview,
     addThinkingStep: execState.addThinkingStep,
+    mergeLeaderStep: execState.mergeLeaderStep,
+    mergeLeaderDecision: execState.mergeLeaderDecision,
+    mergeBossVerdict: execState.mergeBossVerdict,
     mergeAgentStream: execState.mergeAgentStream,
     addToolCall: execState.addToolCall,
     updateToolCall: execState.updateToolCall,

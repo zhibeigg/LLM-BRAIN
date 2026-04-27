@@ -55,6 +55,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,woff,ttf,eot}'],
+        // rollup-plugin-visualizer 生成的报告较大，仅供人工分析，不应进入 PWA 预缓存
+        globIgnores: ['**/stats.html'],
         runtimeCaching: [
           // Google Fonts 缓存
           {

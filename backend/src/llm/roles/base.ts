@@ -67,8 +67,12 @@ export abstract class LLMRoleBase {
     yield* this.chatStreamWithMessages(messages)
   }
 
-  /** 带完整消息列表的流式 chat（用于工具调用后的最终回答） */
-  async *chatStreamWithMessages(messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+  /** 带完整消息列表的流式 chat（可选携带工具定义，用于 Agent 真流式工具调用循环） */
+  async *chatStreamWithMessages(
+    messages: ChatMessage[],
+    tools?: OpenAIToolDef[],
+    toolChoice?: Parameters<import('../providers/base.js').LLMProviderAdapter['chat']>[0]['tool_choice'],
+  ): AsyncGenerator<StreamChunk> {
     const config = getRoleConfig(this.role)
     if (!config) throw new Error(`角色 ${this.role} 未配置 LLM`)
 
@@ -78,6 +82,9 @@ export abstract class LLMRoleBase {
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       stream: true,
+      responseFormat: this.jsonMode && (!tools || tools.length === 0) ? 'json' : undefined,
+      tools: tools && tools.length > 0 ? tools : undefined,
+      tool_choice: toolChoice,
     })
   }
 }

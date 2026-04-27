@@ -26,7 +26,7 @@ function normalizeProviderType(value: string | undefined): LLMProviderType {
 
 function normalizeApiMode(value: string | undefined, providerType: LLMProviderType): LLMApiMode {
   if (providerType === 'anthropic') return 'anthropic-messages'
-  if (value === 'openai-chat' || value === 'openai-responses') return value
+  if (value === 'openai-chat' || value === 'openai-responses' || value === 'openai-codex') return value
   return 'auto'
 }
 

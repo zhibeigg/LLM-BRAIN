@@ -73,12 +73,13 @@ function getStepSignal(step: ThinkingStep): SignalEvent {
     }
     case 'boss_verdict': {
       const data = step.data as BossVerdictPayload
+      const isUncertain = data.uncertain || data.verdict === 'uncertain'
       return {
         id: step.id,
         type: step.type,
-        label: data.passed ? '评审已通过' : '评审要求修正',
-        detail: data.isLoop ? '检测到循环风险' : `第 ${data.retryCount} 次重试`,
-        tone: data.passed ? 'boss' : 'alert',
+        label: data.passed ? '评审已通过' : isUncertain ? '评审不确定，已停止重试' : '评审要求修正',
+        detail: data.isLoop ? '检测到循环风险' : isUncertain ? '避免继续消耗 token' : `第 ${data.retryCount} 次重试`,
+        tone: data.passed ? 'boss' : isUncertain ? 'tool' : 'alert',
         timestamp: step.timestamp,
       }
     }
@@ -93,6 +94,15 @@ function getStepSignal(step: ThinkingStep): SignalEvent {
         timestamp: step.timestamp,
       }
     }
+  }
+
+  return {
+    id: step.id,
+    type: step.type,
+    label: '状态更新',
+    detail: '收到新的思考事件',
+    tone: 'memory',
+    timestamp: step.timestamp,
   }
 }
 

@@ -22,6 +22,9 @@ const nextId = () => `step-${Date.now()}-${++idCounter}`
 
 export function useWebSocket() {
   const addThinkingStep = useTaskStore((s) => s.addThinkingStep)
+  const mergeLeaderStep = useTaskStore((s) => s.mergeLeaderStep)
+  const mergeLeaderDecision = useTaskStore((s) => s.mergeLeaderDecision)
+  const mergeBossVerdict = useTaskStore((s) => s.mergeBossVerdict)
   const mergeAgentStream = useTaskStore((s) => s.mergeAgentStream)
   const addToolCall = useTaskStore((s) => s.addToolCall)
   const updateToolCall = useTaskStore((s) => s.updateToolCall)
@@ -74,28 +77,22 @@ export function useWebSocket() {
     const unsubLeaderStep = wsClient.on('leader_step', (msg: WSMessage) => {
       ensureRunning()
       const payload = msg.payload as LeaderStepPayload
-      addThinkingStep({
-        id: nextId(),
-        type: 'leader_step',
-        timestamp: msg.timestamp,
-        data: payload,
-      })
+      const created = mergeLeaderStep(payload, msg.timestamp)
       setActiveNode(payload.currentNodeId)
-      pushLeaderPathNode(payload.currentNodeId)
+      if (created) {
+        pushLeaderPathNode(payload.currentNodeId)
+      }
       schedulePersistCurrentSession('running')
     })
 
     const unsubLeaderDecision = wsClient.on('leader_decision', (msg: WSMessage) => {
       const payload = msg.payload as LeaderDecisionPayload
-      addThinkingStep({
-        id: nextId(),
-        type: 'leader_decision',
-        timestamp: msg.timestamp,
-        data: payload,
-      })
-      setActiveEdge(payload.chosenEdgeId)
-      if (payload.chosenEdgeId) {
-        setLeaderPathEdge(payload.chosenEdgeId)
+      mergeLeaderDecision(payload, msg.timestamp)
+      if (payload.done !== false) {
+        setActiveEdge(payload.chosenEdgeId)
+        if (payload.chosenEdgeId) {
+          setLeaderPathEdge(payload.chosenEdgeId)
+        }
       }
       schedulePersistCurrentSession('running')
     })
@@ -133,13 +130,8 @@ export function useWebSocket() {
 
     const unsubBossVerdict = wsClient.on('boss_verdict', (msg: WSMessage) => {
       const payload = msg.payload as BossVerdictPayload
-      addThinkingStep({
-        id: nextId(),
-        type: 'boss_verdict',
-        timestamp: msg.timestamp,
-        data: payload,
-      })
-      if (payload.passed) {
+      mergeBossVerdict(payload, msg.timestamp)
+      if (payload.done !== false && (payload.passed || payload.uncertain || payload.isLoop)) {
         setIsRunning(false)
         persistCurrentSession('success')
       } else {
@@ -243,5 +235,5 @@ export function useWebSocket() {
       unsubTaskComplete()
       wsClient.disconnect()
     }
-  }, [addThinkingStep, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, pushLeaderPathNode, setLeaderPathEdge, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, persistCurrentSession, schedulePersistCurrentSession, fetchGraph, addNewNodeId])
+  }, [addThinkingStep, mergeLeaderStep, mergeLeaderDecision, mergeBossVerdict, mergeAgentStream, addToolCall, updateToolCall, appendAgentOutput, setActiveEdge, setActiveNode, pushLeaderPathNode, setLeaderPathEdge, setIsRunning, setIsLearning, setError, setQueue, setPendingPlan, setPendingStep, persistCurrentSession, schedulePersistCurrentSession, fetchGraph, addNewNodeId])
 }

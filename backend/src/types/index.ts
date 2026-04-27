@@ -111,7 +111,7 @@ export const BUILTIN_DIMENSIONS: Omit<PersonalityDimension, 'id' | 'brainId'>[] 
 
 export type LLMProviderType = 'openai' | 'anthropic'
 
-export type LLMApiMode = 'auto' | 'openai-chat' | 'openai-responses' | 'anthropic-messages'
+export type LLMApiMode = 'auto' | 'openai-chat' | 'openai-responses' | 'openai-codex' | 'anthropic-messages'
 
 export interface LLMProvider {
   id: string
@@ -153,7 +153,7 @@ export interface DifficultyPersonalityMapping {
 
 // ===== 执行历史 =====
 
-export type ExecutionStatus = 'success' | 'failure' | 'loop_detected'
+export type ExecutionStatus = 'success' | 'failure' | 'uncertain' | 'loop_detected'
 
 export interface ExecutionHistory {
   id: string
@@ -225,13 +225,16 @@ export interface LeaderStepPayload {
     difficultyTypes: DifficultyType[]
   }>
   thinking: string
+  done?: boolean
   trace?: LLMTrace
 }
 
 export interface LeaderDecisionPayload {
+  stepIndex?: number
   chosenEdgeId: string | null
   reason: string
   totalSteps: number
+  done?: boolean
   trace?: LLMTrace
 }
 
@@ -251,11 +254,16 @@ export interface ToolCallPayload {
   durationMs?: number
 }
 
+export type BossVerdict = 'passed' | 'failed' | 'uncertain' | 'loop'
+
 export interface BossVerdictPayload {
+  verdict: BossVerdict
   passed: boolean
+  uncertain: boolean
   feedback: string
   isLoop: boolean
   retryCount: number
+  done?: boolean
   trace?: LLMTrace
 }
 

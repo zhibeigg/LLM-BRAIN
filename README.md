@@ -41,6 +41,7 @@
 - **工具系统** — 18 种内置工具（网页搜索、代码执行、记忆读写、浏览器、文件读写编辑、代码搜索等），Agent 自主调用，结构化可视化展示每次工具调用的参数、结果和耗时
 - **Vibe Coding 工作流** — 文件读取/写入/编辑、代码搜索（ripgrep 集成）、文件查找、目录列表，支持 diff 视图和终端风格输出
 - **开发工具管理** — 设置中一键安装 ripgrep 等开发工具，增强 LLM 编码能力
+- **GPT 三格式支持** — OpenAI/GPT 兼容提供商可显式选择 Responses、Completions、Codex 三种 API 格式
 - **LLM 容错** — 自动重试（429/5xx）、指数退避、请求超时控制，支持 Retry-After
 - **国际化** — 内置中英文双语支持，设置中一键切换
 - **用户系统** — JWT 认证，多用户数据隔离
@@ -87,6 +88,7 @@
 4. Boss 验证：
    ✅ 通过 → 调低路径难度(×0.95)，智能蒸馏新知识（去重 + 条件过滤）
    ❌ 未通过 → 调高路径难度(×1.1)，最多重试 3 次
+   ❔ 不确定 → 停止自动重试，避免误输入或需求不明确时继续消耗 token
 ```
 
 ## 🎭 性格系统
@@ -157,7 +159,7 @@ bun run dev        # 同时启动前后端
 
 1. 注册账户
 2. 创建大脑（填写名称、项目目录、性格描述）
-3. 在设置中配置 LLM 提供商（支持 OpenAI 兼容接口）
+3. 在设置中配置 LLM 提供商（GPT 兼容接口支持 Responses / Completions / Codex 三种 API 模式）
 4. 配置各角色的模型
 5. 输入任务或使用 `/learn <主题>` 命令学习新知识
 
@@ -173,7 +175,7 @@ bun run dev        # 同时启动前后端
 | 后端 | Express 4 + TypeScript |
 | 实时通信 | WebSocket (ws) |
 | 数据库 | SQLite (better-sqlite3) |
-| LLM | OpenAI SDK 4（兼容任意 OpenAI API 格式） |
+| LLM | OpenAI SDK 4（GPT 兼容 Responses / Completions / Codex，Anthropic Messages） |
 | 认证 | JWT (jsonwebtoken + bcryptjs) |
 | 国际化 | 内置轻量 i18n（React Context） |
 | 测试 | Vitest 4 |
@@ -263,6 +265,7 @@ User Query → Leader pathfinds in graph → Collect memories along path → Age
 - **Tool System** — 18 built-in tools (web search, code execution, memory read/write, browser, file read/write/edit, code search, etc.), Agent autonomously invokes with structured visualization of each tool call's parameters, results, and duration
 - **Vibe Coding Workflow** — File read/write/edit, code search (ripgrep integration), file find, directory listing, with diff view and terminal-style output
 - **Dev Tool Management** — One-click install of ripgrep and other dev tools in settings to enhance LLM coding capabilities
+- **GPT Three-Format Support** — OpenAI/GPT-compatible providers can explicitly use Responses, Completions, or Codex API formats
 - **LLM Fault Tolerance** — Auto-retry (429/5xx), exponential backoff, request timeout control, Retry-After support
 - **Internationalization** — Built-in Chinese/English bilingual support, one-click switch in settings
 - **User System** — JWT authentication, multi-user data isolation
@@ -293,7 +296,7 @@ User Query → Leader pathfinds in graph → Collect memories along path → Age
 |------|---------------|-------------|
 | **Leader** | Path Decision | Progressively selects optimal paths in the directed graph, filtering candidate edges based on perceived difficulty and personality thresholds |
 | **Agent** | Task Execution | Receives personality prompt + path memory context, supports tool call loops (up to 10 rounds), streams output |
-| **Boss** | Quality Verification | Objectively verifies task completion, detects infinite loops, unaffected by personality |
+| **Boss** | Quality Verification | Objectively verifies task completion, supports an “uncertain” verdict to stop low-value retries, detects infinite loops, unaffected by personality |
 | **Scholar** | Knowledge Learning | Decomposes learning topics into DAG structures of 3-8 nodes |
 | **Evaluator** | Difficulty Assessment | Evaluates base difficulty and 6 difficulty type distributions for new edges |
 | **PersonalityParser** | Personality Parsing | Converts natural language personality descriptions into dimension values |
@@ -309,6 +312,7 @@ User Query → Leader pathfinds in graph → Collect memories along path → Age
 4. Boss verification:
    ✅ Passed → Lower path difficulty (×0.95), smart knowledge distillation (dedup + conditional filtering)
    ❌ Failed → Raise path difficulty (×1.1), retry up to 3 times
+   ❔ Uncertain → Stop automatic retries to avoid wasting tokens on mistyped or unclear prompts
 ```
 
 ## 🎭 Personality System
@@ -379,7 +383,7 @@ Visit http://localhost:5173
 
 1. Register an account
 2. Create a brain (fill in name, project directory, personality description)
-3. Configure LLM providers in settings (supports OpenAI-compatible APIs)
+3. Configure LLM providers in settings (GPT-compatible APIs support Responses / Completions / Codex modes)
 4. Configure models for each role
 5. Enter a task or use `/learn <topic>` command to learn new knowledge
 
@@ -395,7 +399,7 @@ Visit http://localhost:5173
 | Backend | Express 4 + TypeScript |
 | Real-time Communication | WebSocket (ws) |
 | Database | SQLite (better-sqlite3) |
-| LLM | OpenAI SDK 4 (compatible with any OpenAI API format) |
+| LLM | OpenAI SDK 4 (GPT-compatible Responses / Completions / Codex, Anthropic Messages) |
 | Authentication | JWT (jsonwebtoken + bcryptjs) |
 | Internationalization | Built-in lightweight i18n (React Context) |
 | Testing | Vitest 4 |

@@ -1,6 +1,6 @@
 import { LLMRoleBase } from './base.js'
 import type { LLMRole } from '../../types/index.js'
-import type { ChatMessage, OpenAIToolDef } from '../providers/base.js'
+import type { ChatMessage, ChatCompletionResult, OpenAIToolDef, StreamToolCallDelta } from '../providers/base.js'
 import type { ToolContext } from '../../types/index.js'
 import { executeTool } from '../../tools/index.js'
 import { broadcast } from '../../ws/server.js'
@@ -16,6 +16,14 @@ interface InlineToolCallParseResult {
     function: { name: string; arguments: string }
   }>
 }
+
+interface StreamRoundResult {
+  result: ChatCompletionResult
+  streamedContent: boolean
+  receivedAnyEvent: boolean
+}
+
+type ToolCallAccumulator = NonNullable<ChatCompletionResult['tool_calls']>[number]
 
 function decodeXmlEntity(value: string): string {
   return value
@@ -95,17 +103,73 @@ function parseInlineToolCalls(content: string, tools: OpenAIToolDef[], round: nu
   return { content: cleaned.trim(), toolCalls }
 }
 
+function mergeToolCallDelta(
+  callsByIndex: Map<number, ToolCallAccumulator>,
+  delta: StreamToolCallDelta,
+  round: number,
+): void {
+  const index = Number.isFinite(delta.index) ? delta.index : callsByIndex.size
+  let call = callsByIndex.get(index)
+  if (!call) {
+    call = {
+      id: delta.id || `stream-${Date.now()}-${round}-${index}`,
+      type: 'function',
+      function: { name: '', arguments: '' },
+    }
+    callsByIndex.set(index, call)
+  }
+
+  if (delta.id) call.id = delta.id
+  if (delta.type === 'function') call.type = 'function'
+  if (delta.function?.name) {
+    const name = delta.function.name
+    if (!call.function.name || name === call.function.name || name.startsWith(call.function.name)) {
+      call.function.name = name
+    } else {
+      call.function.name += name
+    }
+  }
+  if (delta.function?.arguments) {
+    const args = delta.function.arguments
+    if (args.startsWith('{') && call.function.arguments && args.length >= call.function.arguments.length) {
+      call.function.arguments = args
+    } else {
+      call.function.arguments += args
+    }
+  }
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function broadcastAgentText(content: string, done = false): Promise<void> {
+async function broadcastAgentChunk(content: string): Promise<boolean> {
   const text = content.replace(/\r\n/g, '\n')
-  const chunkSize = 28
+  if (!text) return false
+
+  // 有些 OpenAI 兼容网关会把多个 token 合并成一个较大的 SSE chunk。
+  // 这里把大块拆成更小的 UI chunk，避免前端“整坨突然出现”。
+  const chunkSize = 6
+  const baseDelay = text.length > chunkSize ? 12 : 0
   for (let i = 0; i < text.length; i += chunkSize) {
     broadcast('agent_stream', { chunk: text.slice(i, i + chunkSize), done: false } satisfies AgentStreamPayload)
-    // 微小节流让前端能呈现流式增长，同时避免刷屏阻塞。
-    await delay(10)
+    if (baseDelay > 0 && i + chunkSize < text.length) {
+      await delay(baseDelay)
+    }
+  }
+  return true
+}
+
+async function broadcastAgentText(content: string, done = false): Promise<void> {
+  const text = content.replace(/\r\n/g, '\n')
+  // 非流式兜底时的小块 + 随机抖动延迟，模拟真实 LLM token 流式输出的节奏
+  const chunkSize = 4
+  const baseDelay = 35
+  for (let i = 0; i < text.length; i += chunkSize) {
+    broadcast('agent_stream', { chunk: text.slice(i, i + chunkSize), done: false } satisfies AgentStreamPayload)
+    // 在基础延迟上添加 ±40% 的随机抖动，避免机械感
+    const jitter = baseDelay * (0.6 + Math.random() * 0.8)
+    await delay(Math.round(jitter))
   }
   if (done) {
     broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
@@ -148,6 +212,42 @@ export class AgentRole extends LLMRoleBase {
 关键：当用户给你一个涉及代码或文件的任务时，你必须主动调用工具去执行，而不是只给出文字建议或代码片段。你有完整的文件系统访问权限，请直接操作。`
   }
 
+  private async streamChatRound(
+    messages: ChatMessage[],
+    tools: OpenAIToolDef[],
+    round: number,
+  ): Promise<StreamRoundResult> {
+    const callsByIndex = new Map<number, ToolCallAccumulator>()
+    let content = ''
+    let streamedContent = false
+    let receivedAnyEvent = false
+
+    for await (const chunk of this.chatStreamWithMessages(messages, tools)) {
+      receivedAnyEvent = true
+      content += chunk.content
+      if (await broadcastAgentChunk(chunk.content)) {
+        streamedContent = true
+      }
+      for (const toolDelta of chunk.tool_calls ?? []) {
+        mergeToolCallDelta(callsByIndex, toolDelta, round)
+      }
+    }
+
+    const toolCalls = [...callsByIndex.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, call]) => call)
+      .filter((call) => call.function.name.trim().length > 0)
+
+    return {
+      result: {
+        content,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      },
+      streamedContent,
+      receivedAnyEvent,
+    }
+  }
+
   /**
    * 带工具调用循环的执行方法。
    * 如果 LLM 返回 tool_calls，自动执行工具并将结果反馈给 LLM，
@@ -167,9 +267,29 @@ export class AgentRole extends LLMRoleBase {
     console.log(`[Agent] tool names: ${tools.map(t => t.function.name).join(', ')}`)
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      console.log(`[Agent] round ${round}: calling chatWithMessages with ${tools.length} tools`)
-      const result = await this.chatWithMessages(messages, tools)
-      console.log(`[Agent] round ${round}: content=${result.content?.length ?? 0} chars, tool_calls=${result.tool_calls?.length ?? 0}`)
+      console.log(`[Agent] round ${round}: streaming chatWithMessages with ${tools.length} tools`)
+      let result: ChatCompletionResult
+      let contentWasStreamed = false // 标记是否已通过流式 API 实时广播过内容
+
+      try {
+        const streamedRound = await this.streamChatRound(messages, tools, round)
+        result = streamedRound.result
+        contentWasStreamed = streamedRound.streamedContent
+        console.log(`[Agent] round ${round}: streamed content=${result.content?.length ?? 0} chars, tool_calls=${result.tool_calls?.length ?? 0}`)
+
+        // Responses API 或某些兼容网关可能不完整支持工具流事件；此时回退到非流式以保证工具调用不丢失。
+        if (!streamedRound.receivedAnyEvent || (!result.content && (!result.tool_calls || result.tool_calls.length === 0))) {
+          console.log(`[Agent] round ${round}: stream yielded no usable data, fallback to non-stream chat`)
+          result = await this.chatWithMessages(messages, tools)
+          contentWasStreamed = false
+          console.log(`[Agent] round ${round}: fallback content=${result.content?.length ?? 0} chars, tool_calls=${result.tool_calls?.length ?? 0}`)
+        }
+      } catch (err) {
+        console.warn(`[Agent] round ${round}: streaming with tools failed, fallback to non-stream chat: ${err instanceof Error ? err.message : String(err)}`)
+        result = await this.chatWithMessages(messages, tools)
+        contentWasStreamed = false
+        console.log(`[Agent] round ${round}: fallback content=${result.content?.length ?? 0} chars, tool_calls=${result.tool_calls?.length ?? 0}`)
+      }
 
       // 部分 OpenAI 兼容模型不会返回标准 tool_calls，而是把工具调用写成
       // <file_list path="." /> / <terminal command="..." /> 这类文本。
@@ -183,41 +303,23 @@ export class AgentRole extends LLMRoleBase {
         }
       }
 
-      // 如果没有 tool_calls，说明可能进入最终回答阶段。
-      // 某些兼容 Responses API 会在非流式请求返回空响应，此时兜底收集一次流式文本；
-      // 但不要边收集边广播，先检查里面是否混入了 XML 风格伪工具调用。
+      // 如果没有 tool_calls，说明进入最终回答阶段。
       if (!result.tool_calls || result.tool_calls.length === 0) {
-        if (!result.content) {
-          console.log(`[Agent] round ${round}: no content/tool_calls, collecting fallback stream for inline tool detection`)
-          let fallbackContent = ''
-          for await (const chunk of this.chatStreamWithMessages(messages)) {
-            fallbackContent += chunk.content
-          }
-          result.content = fallbackContent
-
-          if (fallbackContent) {
-            const parsedInline = parseInlineToolCalls(fallbackContent, tools, round)
-            if (parsedInline.toolCalls.length > 0) {
-              result.content = parsedInline.content
-              result.tool_calls = parsedInline.toolCalls
-              console.log(`[Agent] round ${round}: parsed ${parsedInline.toolCalls.length} inline XML-style tool calls from fallback stream`)
-            }
-          }
-        }
-
-        if (!result.tool_calls || result.tool_calls.length === 0) {
-          console.log(`[Agent] round ${round}: no tool_calls, using final content`)
-          if (result.content) {
+        console.log(`[Agent] round ${round}: no tool_calls, using final content`)
+        if (result.content) {
+          if (!contentWasStreamed) {
             await broadcastAgentText(result.content, true)
           } else {
             broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
           }
-          return result.content
+        } else {
+          broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
         }
+        return result.content
       }
 
-      // 有 tool_calls 且有中间思考内容时，按小块推送给前端
-      if (result.content) {
+      // 有 tool_calls 且有中间思考内容时：如果不是实时流出来的，则兜底按小块推送给前端。
+      if (result.content && !contentWasStreamed) {
         await broadcastAgentText(result.content)
       }
 
@@ -268,7 +370,10 @@ export class AgentRole extends LLMRoleBase {
     let finalContent = ''
     for await (const chunk of this.chatStreamWithMessages(messages)) {
       finalContent += chunk.content
-      broadcast('agent_stream', { chunk: chunk.content, done: chunk.done } satisfies AgentStreamPayload)
+      await broadcastAgentChunk(chunk.content)
+      if (chunk.done) {
+        broadcast('agent_stream', { chunk: '', done: true } satisfies AgentStreamPayload)
+      }
     }
     return finalContent
   }

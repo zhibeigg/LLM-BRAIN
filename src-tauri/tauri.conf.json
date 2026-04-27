@@ -1,6 +1,6 @@
 {
   "productName": "LLM-BRAIN",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.llm-brain.app",
   "build": {
     "beforeDevCommand": "cd frontend && bun run dev",

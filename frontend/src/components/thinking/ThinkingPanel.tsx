@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback } from 'react'
 import { Box, Typography, Chip, LinearProgress, Alert, Collapse, IconButton, Tooltip, Button, CircularProgress } from '@mui/material'
 import {
   Psychology as ThinkIcon,
@@ -21,6 +21,7 @@ import {
   Build as BuildIcon,
   Stop as StopIcon,
   Undo as UndoIcon,
+  KeyboardDoubleArrowDown as JumpDownIcon,
 } from '@mui/icons-material'
 import { useQueueStore, useSessionStore, useTaskExecutionStore, useTaskStore } from '../../stores/taskStore'
 import { useGraphStore } from '../../stores/graphStore'
@@ -50,6 +51,27 @@ const STEP_ICONS = {
   learning_progress: { icon: LearnIcon, label: '知识学习' },
   tool_call: { icon: BuildIcon, label: '工具调用' },
 } as const
+
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 96
+
+function isNearScrollBottom(element: HTMLElement) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD
+}
+
+function countTextContent(value: unknown): number {
+  if (typeof value === 'string') return value.length
+  if (Array.isArray(value)) return value.reduce((total, item) => total + countTextContent(item), 0)
+  if (value && typeof value === 'object') {
+    return Object.values(value).reduce((total, item) => total + countTextContent(item), 0)
+  }
+  return 0
+}
+
+function formatNewContentSize(size: number) {
+  if (size <= 0) return '有新内容'
+  if (size < 1000) return `新增 ${size} 字`
+  return `新增 ${(size / 1000).toFixed(1)}k 字`
+}
 
 function useStepColors() {
   const c = useColors()
@@ -432,66 +454,71 @@ function PathChoiceCard({
   decision,
   stepNumber,
   index,
-  isLast,
-  isBusy,
+  isHistory,
 }: {
   leaderStep: ThinkingStep
   decision?: ThinkingStep
   stepNumber: number
   index: number
-  isLast: boolean
-  isBusy: boolean
+  isHistory?: boolean
 }) {
   const c = useColors()
   const t = useStepTheme()
-  const [thinkingOpen, setThinkingOpen] = useState(false)
   const graphNodes = useGraphStore((s) => s.nodes)
 
   const stepData = leaderStep.data as LeaderStepPayload
   const decisionData = decision?.data as LeaderDecisionPayload | undefined
   const chosenEdgeId = decisionData?.chosenEdgeId
-  const isDecided = !!decision
+  const isDecisionStreaming = !!decisionData && decisionData.done === false
+  const isStepStreaming = stepData.done === false
+  const isDecisionFinal = !!decision && !isDecisionStreaming
+  const [revealDecision, setRevealDecision] = useState(Boolean(isHistory && isDecisionFinal))
+
+  useEffect(() => {
+    if (!isDecisionFinal) {
+      setRevealDecision(false)
+      return
+    }
+    if (isHistory) {
+      setRevealDecision(true)
+      return
+    }
+
+    // 即使 LLM 很快返回最终选择，也保留一次清晰轮选窗口，避免结果“瞬间跳出”。
+    setRevealDecision(false)
+    const revealDelayMs = Math.min(1800, Math.max(900, stepData.candidates.length * 420))
+    const timer = window.setTimeout(() => setRevealDecision(true), revealDelayMs)
+    return () => window.clearTimeout(timer)
+  }, [isDecisionFinal, isHistory, stepData.stepIndex, stepData.candidates.length, decisionData?.chosenEdgeId, decisionData?.totalSteps])
+
+  const isDecided = isDecisionFinal && revealDecision
   const isStopped = isDecided && !chosenEdgeId
 
-  // ── 流式揭示：分阶段展示卡片内容 ──
-  // phase 0: 刚挂载，只显示标题栏
-  // phase 1: 展示候选列表（延迟 ~150ms）
-  // phase 2: 展示决策结果（decision 到达后再延迟 ~300ms）
-  // 如果挂载时 decision 已存在（历史数据 / 回放），直接跳到 phase 2
-  const [phase, setPhase] = useState(() => isDecided ? 2 : 0)
+  // ── 显示状态直接跟随数据，无人为延时 ──
+  // 候选列表始终显示；最终 decision 揭示前保持单项轮选高亮
+  const isAwaiting = !isDecided
+  const showDecision = isDecided
+  const [activeCandidateIndex, setActiveCandidateIndex] = useState(0)
 
-  // phase 0 → 1：展示候选列表
   useEffect(() => {
-    if (phase !== 0) return
-    const t1 = setTimeout(() => setPhase(1), 150)
-    return () => clearTimeout(t1)
-  }, [phase])
+    if (!isAwaiting || stepData.candidates.length === 0) {
+      setActiveCandidateIndex(0)
+      return
+    }
 
-  // phase 1 → 2：decision 到达后延迟展示结果
-  useEffect(() => {
-    if (!isDecided) return
-    // decision 到达时，如果还在 phase 0/1，直接跳到 2（或延迟一点）
-    if (phase >= 2) return
-    const delay = phase === 0 ? 50 : 300
-    const t2 = setTimeout(() => setPhase(2), delay)
-    return () => clearTimeout(t2)
-  }, [phase, isDecided])
+    setActiveCandidateIndex(0)
+    const timer = window.setInterval(() => {
+      setActiveCandidateIndex((current) => (current + 1) % stepData.candidates.length)
+    }, 420)
 
-  // 真正的等待态：候选列表已展示(phase>=1)，但决策结果还没展示(phase<2)
-  const isAwaiting = phase >= 1 && phase < 2
-  // 决策结果是否已揭示
-  const showDecision = phase >= 2 && isDecided
+    return () => window.clearInterval(timer)
+  }, [isAwaiting, stepData.stepIndex, stepData.candidates.length])
 
   const accentColor = c.textMuted
 
   // 从图谱中查找当前节点标题
   const currentNodeTitle = graphNodes.find(n => n.id === stepData.currentNodeId)?.title
     ?? stepData.currentNodeId?.slice(0, 8) ?? '?'
-
-  // 找到被选中的目标节点名
-  const chosenTarget = chosenEdgeId
-    ? stepData.candidates.find(cd => cd.edgeId === chosenEdgeId)
-    : null
 
   return (
     <Box
@@ -521,14 +548,23 @@ function PathChoiceCard({
           }}
         >
           <RouteIcon sx={{ fontSize: 15, color: c.stepLeader }} />
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: t.bodyText, letterSpacing: '0.02em' }}>
+          <Typography sx={{ fontSize: 14, fontWeight: 600, color: t.bodyText, letterSpacing: '0.02em' }}>
             #{stepNumber}
           </Typography>
-          {/* 等待决策时在编号旁显示 spinner */}
           {isAwaiting && (
-            <CircularProgress size={12} thickness={5} sx={{ color: accentColor }} />
+            <Box
+              aria-label="Leader 正在轮选候选路径"
+              sx={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                bgcolor: accentColor,
+                animation: 'candidatePulse 1.2s ease-in-out infinite',
+                flexShrink: 0,
+              }}
+            />
           )}
-          <Typography sx={{ fontSize: 12, color: t.bodyText, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          <Typography sx={{ fontSize: 13, color: t.bodyText, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
             {currentNodeTitle}
           </Typography>
           {stepData.candidates.length > 0 && (
@@ -536,31 +572,33 @@ function PathChoiceCard({
               label={`${stepData.candidates.length} 条路径`}
               size="small"
               sx={{
-                height: 18, fontSize: 10,
+                height: 18, fontSize: 11,
                 bgcolor: t.chipBg, color: t.dimText,
                 border: `1px solid ${t.chipBorder}`,
               }}
             />
           )}
-          <Typography sx={{ fontSize: 11, color: t.dimText, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+          <Typography sx={{ fontSize: 12, color: t.dimText, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
             {formatTime(leaderStep.timestamp)}
           </Typography>
         </Box>
 
-        {/* 岔路列表 —— phase >= 1 时展示 */}
-        <Collapse in={phase >= 1} timeout={250}>
+        {/* 岔路列表 */}
         <Box sx={{ px: 2, py: 1.5 }}>
           {stepData.candidates.length === 0 && (
-            <Typography sx={{ fontSize: 12, color: t.mutedText, fontStyle: 'italic' }}>
+            <Typography sx={{ fontSize: 13, color: t.mutedText, fontStyle: 'italic' }}>
               无出边，自动停止
             </Typography>
           )}
           {stepData.candidates.map((cd, cdIdx) => {
             const isChosen = showDecision && chosenEdgeId === cd.edgeId
+            const isScanning = isAwaiting && stepData.candidates.length > 0
+            const isActiveScan = isScanning && cdIdx === activeCandidateIndex
 
             return (
               <Box
                 key={cd.edgeId}
+                className="candidate-row"
                 sx={{
                   display: 'flex',
                   alignItems: 'center',
@@ -569,33 +607,33 @@ function PathChoiceCard({
                   px: 1,
                   mb: 0.5,
                   borderRadius: '6px',
-                  border: `1px solid ${isChosen ? `${c.primary}40` : 'transparent'}`,
-                  bgcolor: isChosen ? `${c.primary}08` : 'transparent',
-                  transition: 'all 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+                  border: `1px solid ${isChosen ? `${c.primary}40` : isActiveScan ? `${c.primary}55` : isScanning ? `${c.primary}14` : 'transparent'}`,
+                  bgcolor: isChosen ? `${c.primary}08` : isActiveScan ? `${c.primary}14` : 'transparent',
+                  transform: isActiveScan ? 'translate3d(3px, 0, 0)' : 'translate3d(0, 0, 0)',
+                  transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms cubic-bezier(0.22, 1, 0.36, 1), border-color 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  willChange: isScanning ? 'transform, background-color, border-color' : undefined,
                   // 已揭示决策但未被选中的候选项降低透明度
-                  opacity: showDecision && !isChosen ? 0.5 : 1,
-                  // 候选项交错入场
-                  animation: 'stepSlideIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) backwards',
-                  animationDelay: `${cdIdx * 0.05}s`,
+                  opacity: showDecision && !isChosen ? 0.5 : isScanning && !isActiveScan ? 0.72 : 1,
+                  // 非等待态保留候选项交错入场；等待态交给 activeCandidateIndex 持续轮换
+                  animation: isScanning ? undefined : 'stepSlideIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) backwards',
+                  animationDelay: isScanning ? undefined : `${cdIdx * 0.05}s`,
                 }}
               >
-                {/* 状态图标：等待态 → 脉冲点 | 选中 → 打勾弹入 | 停止 → stop | 未选中 → 灰点 */}
+                {/* 状态图标：决策前保持未选中；决策后只给被选中的项打勾 */}
                 {isChosen ? (
                   <ChosenIcon className="candidate-check-in" sx={{ fontSize: 15, color: c.primary, flexShrink: 0 }} />
                 ) : showDecision && isStopped ? (
                   <StopIcon sx={{ fontSize: 14, color: t.dimText, flexShrink: 0 }} />
                 ) : showDecision ? (
                   <DotIcon sx={{ fontSize: 6, color: t.dimText, flexShrink: 0, mx: '4.5px' }} />
-                ) : isAwaiting ? (
-                  <DotIcon className="candidate-pulse" sx={{ fontSize: 8, color: accentColor, flexShrink: 0, mx: '3.5px' }} />
                 ) : (
-                  <ChevronRightIcon sx={{ fontSize: 16, color: t.dimText, flexShrink: 0 }} />
+                  <ChevronRightIcon sx={{ fontSize: 16, color: isActiveScan ? c.primary : isScanning ? accentColor : t.dimText, flexShrink: 0, transition: 'color 220ms cubic-bezier(0.22, 1, 0.36, 1)' }} />
                 )}
 
                 {/* 目标节点名 */}
                 <Typography
                   sx={{
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: isChosen ? 600 : 400,
                     color: isChosen ? c.primary : t.brightText,
                     flex: 1,
@@ -612,7 +650,7 @@ function PathChoiceCard({
                   label={cd.perceivedDifficulty.toFixed(2)}
                   size="small"
                   sx={{
-                    height: 18, fontSize: 10, flexShrink: 0,
+                    height: 18, fontSize: 11, flexShrink: 0,
                     bgcolor: isChosen ? `${c.primary}15` : `${accentColor}15`,
                     color: isChosen ? c.primary : accentColor,
                     border: `1px solid ${isChosen ? `${c.primary}30` : `${accentColor}30`}`,
@@ -628,7 +666,7 @@ function PathChoiceCard({
                         label={dt}
                         size="small"
                         sx={{
-                          height: 16, fontSize: 9,
+                          height: 16, fontSize: 10,
                           bgcolor: 'transparent', color: t.dimText,
                           border: `1px solid ${t.chipBorder}`,
                           '& .MuiChip-label': { px: 0.4 },
@@ -641,108 +679,29 @@ function PathChoiceCard({
             )
           })}
 
-          {/* 等待态：spinner + 文案 */}
-          {isAwaiting && stepData.candidates.length > 0 && (
-            <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${t.chipBorder}` }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <CircularProgress size={13} thickness={5} sx={{ color: accentColor }} />
-                <Typography sx={{ fontSize: 12, color: t.mutedText }}>
-                  Leader 正在决策…
-                </Typography>
-              </Box>
-            </Box>
-          )}
-          {/* 决策结果揭示 */}
-          {showDecision && (
-            <Box sx={{
-              mt: 1, px: 1.5, py: 1, borderRadius: '6px',
-              bgcolor: isStopped ? `${c.warning}08` : `${c.primary}08`,
-              border: `1px solid ${isStopped ? `${c.warning}20` : `${c.primary}20`}`,
-              animation: 'stepSlideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both',
-            }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-                {isStopped ? (
-                  <>
-                    <StopIcon sx={{ fontSize: 14, color: c.warning }} />
-                    <Typography sx={{ fontSize: 12, fontWeight: 600, color: c.warning }}>
-                      停止遍历
-                    </Typography>
-                  </>
-                ) : (
-                  <>
-                    <RouteIcon sx={{ fontSize: 14, color: c.primary }} />
-                    <Typography sx={{ fontSize: 12, fontWeight: 600, color: c.primary }}>
-                      → {chosenTarget?.targetNodeTitle ?? '未知'}
-                    </Typography>
-                    <Typography sx={{ fontSize: 11, color: t.dimText }}>
-                      继续第 {(decisionData?.totalSteps ?? stepNumber) + 1} 步
-                    </Typography>
-                  </>
-                )}
-              </Box>
-              {decisionData?.reason && (
-                <Typography sx={{ fontSize: 11, color: t.mutedText, mt: 0.5 }}>
-                  {decisionData.reason.length > 80 ? decisionData.reason.slice(0, 80) + '…' : decisionData.reason}
-                </Typography>
-              )}
-            </Box>
-          )}
-
-          {/* 二级展开：thinking + reason */}
-          {(stepData.thinking || decisionData?.reason) && (
-            <Box sx={{ mt: 1 }}>
-              <Box
-                role="button"
-                tabIndex={0}
-                aria-expanded={thinkingOpen}
-                onClick={() => setThinkingOpen(!thinkingOpen)}
-                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setThinkingOpen(!thinkingOpen) } }}
-                sx={{
-                  display: 'flex', alignItems: 'center', gap: 0.5,
-                  cursor: 'pointer', userSelect: 'none',
-                  '&:hover': { '& .expand-label': { color: accentColor } },
-                }}
-              >
-                <ExpandMoreIcon
-                  sx={{
-                    fontSize: 16, color: t.dimText,
-                    transform: thinkingOpen ? 'rotate(180deg)' : 'none',
-                    transition: 'transform 0.2s',
-                  }}
-                />
-                <Typography className="expand-label" sx={{ fontSize: 11, color: t.dimText, transition: 'color 0.15s' }}>
-                  {thinkingOpen ? '收起推理过程' : '展开推理过程'}
-                </Typography>
-              </Box>
-              <Collapse in={thinkingOpen} timeout={200}>
-                <Box sx={{ mt: 0.75, pl: 1, borderLeft: `2px solid ${t.chipBorder}` }}>
-                  {stepData.thinking && (
-                    <Box sx={{ mb: decisionData?.reason ? 1 : 0 }}>
-                      {tryParseJson(stepData.thinking) ? (
-                        <FriendlyContent text={stepData.thinking} maxHeight={150} />
-                      ) : (
-                        <Typography sx={{ fontSize: 12, color: t.mutedText, whiteSpace: 'pre-wrap', fontStyle: 'italic' }}>
-                          {stepData.thinking}
-                        </Typography>
-                      )}
-                    </Box>
-                  )}
-                  {decisionData?.reason && (
-                    <Typography sx={{ fontSize: 12, color: t.bodyText, whiteSpace: 'pre-wrap' }}>
-                      {decisionData.reason}
-                    </Typography>
-                  )}
-                </Box>
-              </Collapse>
-            </Box>
-          )}
-
           {/* 溯源信息 */}
           <TraceDetail trace={stepData.trace} />
           {decisionData?.trace && <TraceDetail trace={decisionData.trace} />}
         </Box>
-        </Collapse>
       </div>
+
+      {/* 卡片外部：thinking + reason 简洁显示 */}
+      {(stepData.thinking || decisionData?.reason) && (
+        <Box sx={{ mt: 0.75, pl: 1.5 }}>
+          {stepData.thinking && (
+            <Typography sx={{ fontSize: 13, color: t.mutedText, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+              {stepData.thinking}
+              {isStepStreaming && !decisionData?.reason && <span className="agent-cursor" />}
+            </Typography>
+          )}
+          {decisionData?.reason && (
+            <Typography sx={{ fontSize: 13, color: t.bodyText, whiteSpace: 'pre-wrap', lineHeight: 1.6, mt: stepData.thinking ? 0.5 : 0 }}>
+              {decisionData.reason}
+              {isDecisionStreaming && <span className="agent-cursor" />}
+            </Typography>
+          )}
+        </Box>
+      )}
     </Box>
   )
 }
@@ -765,27 +724,37 @@ function StepContent({ step }: { step: ThinkingStep }) {
     }
     case 'boss_verdict': {
       const data = step.data as BossVerdictPayload
+      const isStreaming = data.done === false
+      const isUncertain = data.uncertain || data.verdict === 'uncertain'
+      const verdictColor = isStreaming ? c.textMuted : isUncertain ? c.warning : data.passed ? c.success : c.error
+      const verdictLabel = isStreaming ? '评审中' : isUncertain ? '不确定' : data.passed ? '通过' : data.isLoop ? '循环' : '未通过'
       return (
         <>
           <Chip
-            label={data.passed ? '通过' : data.isLoop ? '循环' : '未通过'}
+            label={verdictLabel}
             size="small"
             sx={{
-              height: 22, fontSize: 12, mb: 0.5,
-              bgcolor: data.passed ? `${c.success}20` : `${c.error}20`,
-              color: data.passed ? c.success : c.error,
-              border: `1px solid ${data.passed ? `${c.success}40` : `${c.error}40`}`,
+              height: 22, fontSize: 13, mb: 0.5,
+              bgcolor: `${verdictColor}20`,
+              color: verdictColor,
+              border: `1px solid ${verdictColor}40`,
             }}
           />
-          {!data.passed && (
-            <Typography style={{ color: t.mutedText, fontSize: 13 }}>
+          {!isStreaming && !data.passed && !isUncertain && (
+            <Typography style={{ color: t.mutedText, fontSize: 14 }}>
               重试: {data.retryCount}
             </Typography>
           )}
-          <Typography style={{ color: t.bodyText, fontSize: 13, whiteSpace: 'pre-wrap' }}>
-            {data.feedback}
+          {!isStreaming && isUncertain && (
+            <Typography style={{ color: t.mutedText, fontSize: 13, marginBottom: 4 }}>
+              已停止自动重试，避免继续消耗 token
+            </Typography>
+          )}
+          <Typography style={{ color: t.bodyText, fontSize: 14, whiteSpace: 'pre-wrap' }}>
+            {data.feedback || (isStreaming ? '等待 Boss 评审输出...' : '')}
+            {isStreaming && <span className="agent-cursor" />}
           </Typography>
-          <TraceDetail trace={data.trace} />
+          {!isStreaming && <TraceDetail trace={data.trace} />}
         </>
       )
     }
@@ -802,12 +771,12 @@ function StepContent({ step }: { step: ThinkingStep }) {
             label={phaseLabel[data.phase] ?? data.phase}
             size="small"
             sx={{
-              height: 22, fontSize: 12, mb: 0.5,
+              height: 22, fontSize: 13, mb: 0.5,
               bgcolor: `${phaseColor}20`, color: phaseColor,
               border: `1px solid ${phaseColor}40`,
             }}
           />
-          <Typography style={{ color: t.bodyText, fontSize: 13, whiteSpace: 'pre-wrap' }}>
+          <Typography style={{ color: t.bodyText, fontSize: 14, whiteSpace: 'pre-wrap' }}>
             {data.message}
           </Typography>
           {data.totalNodes != null && data.nodesCreated != null && (
@@ -890,10 +859,10 @@ function StepCard({
           onMouseLeave={(e) => { e.currentTarget.style.background = t.cardHeaderBg }}
         >
           <Icon sx={{ fontSize: 16 }} style={{ color: accentColor }} />
-          <span style={{ fontWeight: 600, color: t.bodyText, flex: 1, fontSize: 13, letterSpacing: '0.02em' }}>
+          <span style={{ fontWeight: 600, color: t.bodyText, flex: 1, fontSize: 14, letterSpacing: '0.02em' }}>
             {icons.label}
           </span>
-          <span style={{ color: t.dimText, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: t.dimText, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
             {formatTime(step.timestamp)}
           </span>
           <ExpandMoreIcon
@@ -952,13 +921,13 @@ function SessionItem({
     >
       <Box sx={{ width: 3, height: 28, borderRadius: 2, bgcolor: typeColor, opacity: isViewing ? 1 : 0.4, flexShrink: 0 }} />
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography sx={{ fontSize: 12.5, color: isViewing ? c.text : c.textSecondary, fontWeight: isViewing ? 500 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+        <Typography sx={{ fontSize: 13, color: isViewing ? c.text : c.textSecondary, fontWeight: isViewing ? 500 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
           {displayPrompt}
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
           {statusIcon}
-          <Typography sx={{ fontSize: 11, color: c.textMuted }}>{formatSessionTime(session.timestamp)}</Typography>
-          <Typography sx={{ fontSize: 11, color: c.textMuted }}>· {session.thinkingSteps.length} 步</Typography>
+          <Typography sx={{ fontSize: 12, color: c.textMuted }}>{formatSessionTime(session.timestamp)}</Typography>
+          <Typography sx={{ fontSize: 12, color: c.textMuted }}>· {session.thinkingSteps.length} 步</Typography>
         </Box>
       </Box>
       {!isActive && (
@@ -988,34 +957,7 @@ function EmptyState() {
           <ThinkIcon sx={{ fontSize: 20, color: c.primary, opacity: 0.6 }} />
         </Box>
       </Box>
-      <Typography sx={{ color: c.textMuted, fontSize: 13, letterSpacing: '0.08em' }}>等待指令...</Typography>
-    </Box>
-  )
-}
-
-function WaitingResponseCard() {
-  const c = useColors()
-  return (
-    <Box sx={{ pb: 1.5 }}>
-      <Box
-        className="step-card step-card--waiting"
-        sx={{
-          borderRadius: '10px',
-          border: `1px solid ${c.text}18`,
-          bgcolor: c.bgCard,
-          px: 1.6,
-          py: 1.25,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-        }}
-      >
-        <CircularProgress size={15} sx={{ color: c.textMuted }} />
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontSize: 12.5, color: c.text, fontWeight: 600 }}>等待 Agent 回复</Typography>
-          <Typography sx={{ fontSize: 11, color: c.textMuted, mt: 0.2 }}>正在连接模型与工具链...</Typography>
-        </Box>
-      </Box>
+      <Typography sx={{ color: c.textMuted, fontSize: 14, letterSpacing: '0.08em' }}>等待指令...</Typography>
     </Box>
   )
 }
@@ -1137,7 +1079,7 @@ function PromptCard({ prompt, isHistory }: { prompt: string; isHistory: boolean 
           cursor: isLong ? 'pointer' : 'default',
         }}
       >
-        <Typography sx={{ fontSize: 12, color: c.textMuted }}>{label}</Typography>
+        <Typography sx={{ fontSize: 13, color: c.textMuted }}>{label}</Typography>
         <Box sx={{ flex: 1 }} />
         {isLong && (
           <ExpandMoreIcon
@@ -1152,14 +1094,14 @@ function PromptCard({ prompt, isHistory }: { prompt: string; isHistory: boolean 
       {isLong ? (
         <Collapse in={expanded} timeout={200}>
           <Box sx={{ px: 2, pb: 1.5 }}>
-            <Typography sx={{ fontSize: 14, color: c.text, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
+            <Typography sx={{ fontSize: 15, color: c.text, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
               {displayText}
             </Typography>
           </Box>
         </Collapse>
       ) : (
         <Box sx={{ px: 2, pb: 1.5, mt: -0.5 }}>
-          <Typography sx={{ fontSize: 14, color: c.text, fontWeight: 500 }}>
+          <Typography sx={{ fontSize: 15, color: c.text, fontWeight: 500 }}>
             {displayText}
           </Typography>
         </Box>
@@ -1197,13 +1139,18 @@ export function ThinkingPanel() {
   const retryCurrentTask = useTaskStore((s) => s.retryCurrentTask)
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const scrollContentRef = useRef<HTMLDivElement>(null)
   const bottomAnchorRef = useRef<HTMLDivElement>(null)
   const historyScrollRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const historyScrollSnapshotRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+  const shouldFollowOutputRef = useRef(true)
+  const seenContentSizeRef = useRef(0)
+  const scrollFrameRef = useRef<number | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [returnMenuOpen, setReturnMenuOpen] = useState(false)
-  const [planReturnMenuOpen, setPlanReturnMenuOpen] = useState(false)
+  const [isFollowingOutput, setIsFollowingOutput] = useState(true)
+  const [newContentSize, setNewContentSize] = useState(0)
 
   const busy = isRunning || isLearning
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
@@ -1227,13 +1174,106 @@ export function ThinkingPanel() {
   const mergedSteps = useMemo(() => mergeSteps(displaySteps), [displaySteps])
   const latestStep = displaySteps.at(-1)
   const latestAgentData = latestStep?.type === 'agent_stream' ? latestStep.data as AgentStreamPayload : null
-  const showWaitingResponse = busy && !isViewingHistory && (!latestStep || latestStep.type !== 'agent_stream' || latestAgentData?.done === true)
+  const isLatestRoutingStep = latestStep?.type === 'leader_step' || latestStep?.type === 'leader_decision'
+  const showWaitingResponse = busy && !isViewingHistory && !isLatestRoutingStep && (!latestStep || latestStep.type !== 'agent_stream' || latestAgentData?.done === true)
+  const displayContentSize = useMemo(() => {
+    return countTextContent(displayPrompt) + displaySteps.reduce((total, step) => total + countTextContent(step.data), 0)
+  }, [displayPrompt, displaySteps])
+
+  const scrollToOutputBottom = useCallback((force = false) => {
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+    if (!force && !shouldFollowOutputRef.current) return
+
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current)
+    }
+
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      scrollElement.scrollTop = scrollElement.scrollHeight
+    })
+  }, [])
+
+  const handleOutputScroll = useCallback(() => {
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+
+    const isNearBottom = isNearScrollBottom(scrollElement)
+    shouldFollowOutputRef.current = isNearBottom
+    setIsFollowingOutput(isNearBottom)
+
+    if (isNearBottom) {
+      seenContentSizeRef.current = displayContentSize
+      setNewContentSize(0)
+    } else if (seenContentSizeRef.current === 0) {
+      seenContentSizeRef.current = displayContentSize
+    }
+  }, [displayContentSize, isViewingHistory])
+
+  const handleJumpToLatest = useCallback(() => {
+    shouldFollowOutputRef.current = true
+    seenContentSizeRef.current = displayContentSize
+    setIsFollowingOutput(true)
+    setNewContentSize(0)
+    scrollToOutputBottom(true)
+  }, [displayContentSize, scrollToOutputBottom])
 
   useEffect(() => {
-    if (!isViewingHistory && bottomAnchorRef.current) {
-      bottomAnchorRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current)
+      }
     }
-  }, [thinkingSteps.length, isViewingHistory])
+  }, [])
+
+  useEffect(() => {
+    if (isViewingHistory) return
+    shouldFollowOutputRef.current = true
+    setIsFollowingOutput(true)
+    setNewContentSize(0)
+    seenContentSizeRef.current = 0
+    scrollToOutputBottom(true)
+  }, [activeSessionId, currentTaskPrompt, isViewingHistory, scrollToOutputBottom])
+
+  useLayoutEffect(() => {
+    if (isViewingHistory) return
+
+    if (shouldFollowOutputRef.current) {
+      seenContentSizeRef.current = displayContentSize
+      setNewContentSize(0)
+      scrollToOutputBottom()
+      return
+    }
+
+    if (displayContentSize < seenContentSizeRef.current) {
+      seenContentSizeRef.current = displayContentSize
+      setNewContentSize(0)
+      return
+    }
+
+    setNewContentSize(displayContentSize - seenContentSizeRef.current)
+  }, [displayContentSize, showWaitingResponse, pendingPlan, pendingStep, busy, isViewingHistory, scrollToOutputBottom])
+
+  useEffect(() => {
+    if (isViewingHistory) return
+    const contentElement = scrollContentRef.current
+    if (!contentElement) return
+
+    const syncScroll = () => scrollToOutputBottom()
+    const mutationObserver = new MutationObserver(syncScroll)
+    mutationObserver.observe(contentElement, { childList: true, subtree: true, characterData: true })
+
+    const resizeObserver = new ResizeObserver(syncScroll)
+    resizeObserver.observe(contentElement)
+
+    scrollToOutputBottom(true)
+
+    return () => {
+      mutationObserver.disconnect()
+      resizeObserver.disconnect()
+    }
+  }, [isViewingHistory, scrollToOutputBottom])
 
   useEffect(() => {
     if (isViewingHistory && scrollRef.current) {
@@ -1287,12 +1327,12 @@ export function ThinkingPanel() {
                 <BackIcon sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
-            <Typography sx={{ fontWeight: 600, color: c.textSecondary, fontSize: 15 }}>历史记录</Typography>
+            <Typography sx={{ fontWeight: 600, color: c.textSecondary, fontSize: 16 }}>历史记录</Typography>
           </>
         ) : (
           <>
             <ThinkIcon sx={{ fontSize: 18, color: c.primary }} />
-            <Typography sx={{ fontWeight: 600, color: c.text, fontSize: 15 }}>思考过程</Typography>
+            <Typography sx={{ fontWeight: 600, color: c.text, fontSize: 16 }}>思考过程</Typography>
             <Box
               sx={{
                 width: 7, height: 7, borderRadius: '50%', bgcolor: statusColor, ml: 0.5,
@@ -1452,7 +1492,6 @@ export function ThinkingPanel() {
                     clickable
                     onClick={() => {
                       returnToPlanNode(node.nodeId)
-                      setPlanReturnMenuOpen(false)
                     }}
                     sx={{
                       height: 22, fontSize: 11, cursor: 'pointer',
@@ -1549,64 +1588,124 @@ export function ThinkingPanel() {
 
       {/* 滚动区域 */}
       <Box className="thinking-scroll-container" sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <Box ref={scrollRef} sx={{ height: '100%', overflowY: 'auto', pr: 0.5, pt: 0.5 }}>
-          {displayPrompt && <PromptCard prompt={displayPrompt} isHistory={isViewingHistory} />}
+        <Box ref={scrollRef} onScroll={handleOutputScroll} sx={{ height: '100%', overflowY: 'auto', pr: 0.5, pt: 0.5 }}>
+          <Box ref={scrollContentRef}>
+            {displayPrompt && <PromptCard prompt={displayPrompt} isHistory={isViewingHistory} />}
 
-          {/* 路径概览条 */}
-          <PathOverview mergedSteps={mergedSteps} />
+            {/* 路径概览条 */}
+            <PathOverview mergedSteps={mergedSteps} />
 
-          {mergedSteps.length === 0 && !displayPrompt ? (
-            <EmptyState />
-          ) : (
-            (() => {
-              let pathStepNum = 0
-              return mergedSteps.map((merged, i) => {
-                const isLast = i === mergedSteps.length - 1
-                if (merged.kind === 'path_choice' && merged.leaderStep) {
-                  pathStepNum++
-                  return (
-                    <PathChoiceCard
-                      key={merged.leaderStep.id}
-                      leaderStep={merged.leaderStep}
-                      decision={merged.decision}
-                      stepNumber={pathStepNum}
-                      index={i}
-                      isLast={isLast}
-                      isBusy={!isViewingHistory && busy}
-                    />
-                  )
-                }
-                if (merged.kind === 'leader_return' && merged.step) {
-                  return <LeaderReturnCard key={merged.step.id} step={merged.step} />
-                }
-                if (merged.step) {
-                  // tool_call 类型直接渲染为 ToolCallCard（自带卡片样式）
-                  if (merged.step.type === 'tool_call') {
+            {mergedSteps.length === 0 && !displayPrompt ? (
+              <EmptyState />
+            ) : (
+              (() => {
+                let pathStepNum = 0
+                return mergedSteps.map((merged, i) => {
+                  const isLast = i === mergedSteps.length - 1
+                  if (merged.kind === 'path_choice' && merged.leaderStep) {
+                    pathStepNum++
                     return (
-                      <Box key={merged.step.id} sx={{ pb: 1 }}>
-                        <ToolCallCard data={merged.step.data as ToolCallPayload} />
-                      </Box>
+                      <PathChoiceCard
+                        key={merged.leaderStep.id}
+                        leaderStep={merged.leaderStep}
+                        decision={merged.decision}
+                        stepNumber={pathStepNum}
+                        index={i}
+                        isHistory={isViewingHistory}
+                      />
                     )
                   }
-                  return (
-                    <StepCard
-                      key={merged.step.id}
-                      step={merged.step}
-                      index={i}
-                      isLast={isLast}
-                      isBusy={!isViewingHistory && busy}
-                    />
-                  )
-                }
-                return null
-              })
-            })()
-          )}
+                  if (merged.kind === 'leader_return' && merged.step) {
+                    return <LeaderReturnCard key={merged.step.id} step={merged.step} />
+                  }
+                  if (merged.step) {
+                    // tool_call 类型直接渲染为 ToolCallCard（自带卡片样式）
+                    if (merged.step.type === 'tool_call') {
+                      return (
+                        <Box key={merged.step.id} sx={{ pb: 1 }}>
+                          <ToolCallCard data={merged.step.data as ToolCallPayload} />
+                        </Box>
+                      )
+                    }
+                    return (
+                      <StepCard
+                        key={merged.step.id}
+                        step={merged.step}
+                        index={i}
+                        isLast={isLast}
+                        isBusy={!isViewingHistory && busy}
+                      />
+                    )
+                  }
+                  return null
+                })
+              })()
+            )}
 
-          {showWaitingResponse && <WaitingResponseCard />}
+            {/* WaitingResponseCard 已移除 */}
 
-          <div ref={bottomAnchorRef} />
+            <div ref={bottomAnchorRef} />
+          </Box>
         </Box>
+
+        {!isFollowingOutput && (
+          <Box
+            sx={{
+              position: 'absolute',
+              right: 12,
+              bottom: 12,
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              gap: 0.75,
+              pointerEvents: 'none',
+            }}
+          >
+            {!isViewingHistory && newContentSize > 0 && (
+            <Box
+              sx={{
+                px: 1,
+                py: 0.35,
+                borderRadius: '999px',
+                bgcolor: c.bgCard,
+                color: c.textSecondary,
+                border: `1px solid ${c.border}`,
+                boxShadow: `0 8px 24px ${c.shadow}`,
+                fontSize: 11,
+                fontWeight: 600,
+                lineHeight: 1.35,
+              }}
+            >
+              {formatNewContentSize(newContentSize)}
+            </Box>
+            )}
+            <Tooltip title="快速到底部" placement="left">
+              <Button
+                onClick={handleJumpToLatest}
+                size="small"
+                variant="contained"
+                startIcon={<JumpDownIcon sx={{ fontSize: 16 }} />}
+                sx={{
+                  pointerEvents: 'auto',
+                  minHeight: 34,
+                  px: 1.35,
+                  borderRadius: '999px',
+                  textTransform: 'none',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  bgcolor: c.primary,
+                  color: c.textInverse,
+                  boxShadow: `0 10px 28px ${c.shadow}`,
+                  '&:hover': { bgcolor: c.primaryDark },
+                }}
+                aria-label={`${formatNewContentSize(newContentSize)}，快速到底部`}
+              >
+                到底部
+              </Button>
+            </Tooltip>
+          </Box>
+        )}
       </Box>
     </Box>
   )
