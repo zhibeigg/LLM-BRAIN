@@ -181,6 +181,23 @@ bun run dev        # 同时启动前后端
 | 测试 | Vitest 4 |
 | 包管理 | Bun |
 
+## 📦 自动发布
+
+项目内置 GitHub Actions 工作流：`.github/workflows/release.yml`。推送 `v*` 格式的 Git tag 时会自动构建并发布 Release：
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+工作流会在 Linux、Windows、macOS Intel、macOS Apple Silicon 上并行构建 Tauri 桌面包，并把以下产物上传到同一个 GitHub Release：
+
+- Linux：`.deb`、`.AppImage`
+- Windows：NSIS `.exe` 安装包
+- macOS：Intel 与 Apple Silicon `.dmg`
+
+带有预发布标识的标签（例如 `v0.3.0-rc.1`）会自动创建为 prerelease。构建时会临时使用 tag 中的版本号同步 `package.json`、`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 的应用版本。
+
 ## 📁 项目结构
 
 ```
@@ -404,6 +421,23 @@ Visit http://localhost:5173
 | Internationalization | Built-in lightweight i18n (React Context) |
 | Testing | Vitest 4 |
 | Package Manager | Bun |
+
+## 📦 Automated Releases
+
+This repository includes a GitHub Actions workflow at `.github/workflows/release.yml`. Pushing a Git tag that matches `v*` automatically builds and publishes a GitHub Release:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+The workflow builds Tauri desktop bundles in parallel on Linux, Windows, macOS Intel, and macOS Apple Silicon, then uploads these assets to the same GitHub Release:
+
+- Linux: `.deb`, `.AppImage`
+- Windows: NSIS `.exe` installer
+- macOS: Intel and Apple Silicon `.dmg`
+
+Tags with prerelease suffixes, such as `v0.3.0-rc.1`, are published as prereleases. During CI, the app version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` is temporarily synced from the Git tag.
 
 ## 📁 Project Structure
 

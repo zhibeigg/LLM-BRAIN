@@ -1,0 +1,132 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04
+            rust-target: x86_64-unknown-linux-gnu
+            args: "--bundles deb,appimage"
+          - name: Windows x64
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            args: "--bundles nsis"
+          - name: macOS Intel
+            os: macos-15-intel
+            rust-target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin --bundles dmg"
+          - name: macOS Apple Silicon
+            os: macos-15
+            rust-target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin --bundles dmg"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux Tauri dependencies
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: bun install --frozen-lockfile
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Sync app version from tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+
+          const tag = process.env.RELEASE_TAG || '';
+          const version = tag.replace(/^v/, '');
+          if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+            throw new Error(`Release tag must use semantic version format, for example v1.2.3. Current tag: ${tag}`);
+          }
+
+          for (const file of ['package.json', 'src-tauri/tauri.conf.json']) {
+            const content = JSON.parse(fs.readFileSync(file, 'utf8'));
+            content.version = version;
+            fs.writeFileSync(file, `${JSON.stringify(content, null, 2)}\n`);
+          }
+
+          const cargoFile = 'src-tauri/Cargo.toml';
+          const cargoToml = fs.readFileSync(cargoFile, 'utf8').replace(/^version = ".*"$/m, `version = "${version}"`);
+          fs.writeFileSync(cargoFile, cargoToml);
+          NODE
+
+      - name: Build backend
+        run: bun run build:backend
+
+      - name: Build Tauri bundles and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: LLM-BRAIN ${{ github.ref_name }}
+          releaseBody: |
+            自动构建的 LLM-BRAIN 桌面端安装包。
+
+            - Linux: `.deb`、`.AppImage`
+            - Windows: `NSIS .exe` 安装包
+            - macOS: Intel 与 Apple Silicon `.dmg`
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generateReleaseNotes: true
+          assetNamePattern: "[name]_[version]_[platform]_[arch]_[bundle][_setup][ext]"
+          tauriScript: bun run tauri
+          args: ${{ matrix.args }}
