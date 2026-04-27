@@ -31,3 +31,6 @@ test-*.js
 
 # 截图（不入库）
 *.png
+
+# Tauri 应用图标需要进入仓库，CI 在 Linux/macOS 打包时会读取这些 PNG
+!src-tauri/icons/**/*.png
