@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { API_BASE_URL } from '../services/backend'
 
 interface AuthUser {
   id: string
@@ -19,7 +20,7 @@ interface AuthState {
 const TOKEN_KEY = 'llm-brain-token'
 
 async function authRequest(path: string, body: object): Promise<{ token: string; user: AuthUser }> {
-  const res = await fetch(`/api/auth${path}`, {
+  const res = await fetch(`${API_BASE_URL}/auth${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -60,7 +61,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       return
     }
     try {
-      const res = await fetch('/api/auth/me', {
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error()

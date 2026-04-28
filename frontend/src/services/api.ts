@@ -12,8 +12,9 @@ import type {
   DevToolInfo,
 } from '../types'
 import { getToken } from '../stores/authStore'
+import { API_BASE_URL } from './backend'
 
-const BASE_URL = '/api'
+const BASE_URL = API_BASE_URL
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken()

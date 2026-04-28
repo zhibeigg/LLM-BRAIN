@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
+import fs from 'fs'
+import path from 'path'
 
 // 默认密钥（不安全，不应使用）
 const DEFAULT_SECRET = 'llm-brain-secret-key-change-in-production'
@@ -37,8 +39,32 @@ function isDefaultSecret(secret: string): boolean {
   return secret === DEFAULT_SECRET
 }
 
-// 获取并验证 JWT_SECRET
-const JWT_SECRET = process.env.JWT_SECRET
+function loadOrCreateDesktopSecret(): string | undefined {
+  const dataDir = process.env.LLM_BRAIN_DATA_DIR?.trim()
+  if (!dataDir) return undefined
+
+  const secretFile = path.join(dataDir, 'jwt.secret')
+  try {
+    if (fs.existsSync(secretFile)) {
+      const existing = fs.readFileSync(secretFile, 'utf8').trim()
+      if (existing) return existing
+    }
+
+    fs.mkdirSync(dataDir, { recursive: true })
+    let secret = generateSecretKey()
+    while (!isValidSecretFormat(secret)) {
+      secret = generateSecretKey()
+    }
+    fs.writeFileSync(secretFile, secret, { mode: 0o600 })
+    return secret
+  } catch (err) {
+    console.error('[严重错误] 无法读取或创建桌面端 JWT 密钥:', err)
+    return undefined
+  }
+}
+
+// 获取并验证 JWT_SECRET；桌面端 sidecar 会通过 LLM_BRAIN_DATA_DIR 自动创建持久密钥
+const JWT_SECRET = process.env.JWT_SECRET || loadOrCreateDesktopSecret()
 
 // 启动时强制检查
 function validateJwtSecret(): void {

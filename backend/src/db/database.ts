@@ -7,7 +7,8 @@ import { v4 as uuidv4 } from 'uuid'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 function getDbPath(): string {
-  const dataDir = path.join(__dirname, '..', '..', 'data')
+  const configuredDataDir = process.env.LLM_BRAIN_DATA_DIR?.trim()
+  const dataDir = configuredDataDir || path.join(__dirname, '..', '..', 'data')
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true })
   }

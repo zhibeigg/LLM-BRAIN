@@ -9,10 +9,11 @@
     "dev": "concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
     "build:frontend": "cd frontend && bun run build",
     "build:backend": "cd backend && bun run build",
+    "build:backend:sidecar": "bun run scripts/build-backend-sidecar.mjs",
     "build": "bun run build:backend && bun run build:frontend",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:dev": "bun run build:backend && bun run build:backend:sidecar && tauri dev",
+    "tauri:build": "bun run build:backend && bun run build:backend:sidecar && tauri build"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.10.1",

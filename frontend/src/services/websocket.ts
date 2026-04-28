@@ -1,5 +1,6 @@
 import type { WSMessage } from '../types'
 import { getToken } from '../stores/authStore'
+import { getWebSocketUrl } from './backend'
 
 type WSHandler = (message: WSMessage) => void
 
@@ -21,10 +22,8 @@ class WebSocketClient {
     // 先清理旧连接
     this.cleanup()
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const token = getToken()
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : ''
-    const url = `${protocol}//${window.location.host}/ws${tokenParam}`
+    const url = getWebSocketUrl(token)
     const ws = new WebSocket(url)
     this.ws = ws
 

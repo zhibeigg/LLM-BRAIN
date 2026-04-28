@@ -190,7 +190,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-工作流会在 Linux、Windows、macOS Intel、macOS Apple Silicon 上并行构建 Tauri 桌面包，并把以下产物上传到同一个 GitHub Release：
+工作流会在 Linux、Windows、macOS Intel、macOS Apple Silicon 上并行构建 Tauri 桌面包，并把以下产物上传到同一个 GitHub Release。桌面包会内置 Node.js sidecar、后端编译产物和生产依赖，安装后会自动启动本地后端，无需手动运行 `backend`：
 
 - Linux：`.deb`、`.AppImage`
 - Windows：NSIS `.exe` 安装包
@@ -431,7 +431,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-The workflow builds Tauri desktop bundles in parallel on Linux, Windows, macOS Intel, and macOS Apple Silicon, then uploads these assets to the same GitHub Release:
+The workflow builds Tauri desktop bundles in parallel on Linux, Windows, macOS Intel, and macOS Apple Silicon, then uploads these assets to the same GitHub Release. Desktop bundles include a Node.js sidecar, compiled backend output, and production dependencies, so the local backend starts automatically after installation:
 
 - Linux: `.deb`, `.AppImage`
 - Windows: NSIS `.exe` installer
