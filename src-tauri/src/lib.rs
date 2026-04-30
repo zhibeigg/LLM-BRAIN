@@ -1,5 +1,7 @@
 use log::{error, info, warn};
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::Manager;
@@ -28,6 +30,35 @@ fn wait_for_backend() {
     warn!("等待 LLM-BRAIN 后端就绪超时，前端会继续尝试连接");
 }
 
+fn resolve_backend_entry(resource_dir: PathBuf) -> io::Result<PathBuf> {
+    let candidates = [
+        resource_dir
+            .join("resources")
+            .join("backend")
+            .join("dist")
+            .join("index.js"),
+        resource_dir.join("backend").join("dist").join("index.js"),
+    ];
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!(
+            "找不到打包后的后端入口文件，已检查: {}",
+            candidates
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    ))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -39,12 +70,8 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data_dir)?;
 
-            let backend_entry = app
-                .path()
-                .resource_dir()?
-                .join("backend")
-                .join("dist")
-                .join("index.js");
+            let backend_entry = resolve_backend_entry(app.path().resource_dir()?)?;
+            info!("LLM-BRAIN 后端入口: {}", backend_entry.display());
 
             let sidecar = app
                 .shell()
